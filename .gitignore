@@ -1,0 +1,19 @@
+# logs
+dsh-web.out.log
+dsh-web.err.log
+*.log
+
+# backups & temp scripts
+dsh-launcher.backup-*.ps1
+repro-minimal.ps1
+dl-ui-refs.ps1
+tmp-*.png
+美化方案预览*.html
+
+# personal knowledge base (not for publish)
+知识库/
+
+# workspace clutter (local MCP env, docx tools, old patch backups)
+mcp/
+工具脚本/
+旧文件备份/
