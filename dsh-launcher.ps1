@@ -59,6 +59,7 @@ $PetAtlas    = Join-Path $PetDir "atlas.png"
 $SessionsDir = Join-Path $DshHome "sessions"
 $SkillsRoot  = Join-Path $DshHome "skills"
 $BackupsRoot = Join-Path $DshHome "backups"
+$PetCfgFile  = Join-Path $DshHome "launcher-pet.json"
 $Url         = "http://127.0.0.1:3080"
 
 # ------------------------------------------------------------- 工具函数 ----
@@ -127,7 +128,7 @@ function Get-SkillList {
         $md = Join-Path $_.FullName "SKILL.md"
         $name = $_.Name; $desc = ""
         if (Test-Path -LiteralPath $md) {
-            $raw = Get-Content -LiteralPath $md -Raw -ErrorAction SilentlyContinue
+            $raw = Get-Content -LiteralPath $md -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
             if ($raw -match "(?s)^---\s*(.*?)\s*---") {
                 $fm = $matches[1]
                 if ($fm -match "(?m)^name:\s*['""]?([^'""\r\n]+)") { $name = $matches[1].Trim() }
@@ -476,6 +477,22 @@ $xaml = @'
                 </StackPanel>
               </Border>
             </StackPanel>
+            <!-- 环境装配面板 (一键下载安装 DSH 运行环境, 借鉴大肥鱼"别人一键装配"思路) -->
+            <StackPanel x:Name="PanelSetup" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
+              <Border CornerRadius="20" Background="#8CFFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="580">
+                <StackPanel>
+                  <TextBlock Text="环 境 装 配" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
+                  <TextBlock Text="新机器一键装配 DSH 运行环境：检测 node/npm → 自动下载安装 dsh → 生成配置，开箱即用。" Foreground="#8A919E" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                  <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                    <TextBlock x:Name="SetupState" Text="检测中…" Foreground="#1E232C" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    <Button x:Name="BtnSetupGo" Style="{StaticResource PrimaryBtn}" Content="🔧 一键装配" Height="44" Background="#4D6BFE" Padding="26,0" HorizontalAlignment="Right"/>
+                  </StackPanel>
+                  <Border CornerRadius="12" Background="#26FFFFFF" BorderBrush="#55FFFFFF" BorderThickness="1" Padding="12,10" Margin="0,14,0,0">
+                    <TextBlock x:Name="SetupLogBox" Text="" Foreground="#5B6472" FontSize="11.5" FontFamily="Consolas" TextWrapping="Wrap" MaxHeight="160"/>
+                  </Border>
+                </StackPanel>
+              </Border>
+            </StackPanel>
           </Grid>
 
           <!-- footer 链接行 -->
@@ -483,6 +500,7 @@ $xaml = @'
             <Button x:Name="NavHome" Style="{StaticResource FooterLink}" Content="首页" Margin="0,0,14,0"/>
             <Button x:Name="NavEnv" Style="{StaticResource FooterLink}" Content="环境信息" Margin="0,0,14,0"/>
             <Button x:Name="NavSkills" Style="{StaticResource FooterLink}" Content="技能库" Margin="0,0,14,0"/>
+            <Button x:Name="NavSetup" Style="{StaticResource FooterLink}" Content="环境装配" Margin="0,0,14,0"/>
             <Button x:Name="NavLogs" Style="{StaticResource FooterLink}" Content="运行日志" Margin="0,0,14,0"/>
             <Button x:Name="NavBackup" Style="{StaticResource FooterLink}" Content="配置备份" Margin="0,0,14,0"/>
             <Button x:Name="NavDshDir" Style="{StaticResource FooterLink}" Content=".dsh 目录"/>
@@ -610,6 +628,8 @@ $restartLogBox = $window.FindName("RestartLogBox")
 $envRows = $window.FindName("EnvRows")
 $skillCards = $window.FindName("SkillCards")
 $skillCountText = $window.FindName("SkillCountText")
+$setupState = $window.FindName("SetupState")
+$setupLogBox = $window.FindName("SetupLogBox")
 
 # 桌宠窗口元素
 $speechText = $petWin.FindName("SpeechText")
@@ -625,11 +645,13 @@ $panels = @{
     restart = $window.FindName("PanelRestart")
     env     = $window.FindName("PanelEnv")
     skills  = $window.FindName("PanelSkills")
+    setup   = $window.FindName("PanelSetup")
 }
 $navBtns = @{
     home   = $window.FindName("NavHome")
     env    = $window.FindName("NavEnv")
     skills = $window.FindName("NavSkills")
+    setup  = $window.FindName("NavSetup")
 }
 
 # ------------------------------------------------------------ 全局状态 ----
@@ -638,6 +660,7 @@ $script:busy         = $false
 $script:lastIdleAt   = [DateTime]::Now
 $script:rand         = [System.Random]::new()
 $script:sysTick      = 0
+$script:setupRunning = $false
 
 # 鲸鱼台词池
 $script:idleLines = @(
@@ -897,18 +920,22 @@ function Update-Pet {
     if ($p.fade -lt 1.0) { $p.fade = [Math]::Min(1.0, $p.fade + 0.06) }
     $petHost.Opacity = $p.fade
 
-    # 摇摆 + 拖拽侧身
+    # 摇摆 + 拖拽侧身 (走路时摆动幅度更大, 补帧数少的僵硬感)
     $lean = if ($p.drag) { 8.0 } else { 0.0 }
-    $script:petRotate.Angle = [Math]::Sin($p.phase * 2.2) * 2 + $lean
+    $walking = ($p.anim -eq "right" -or $p.anim -eq "left")
+    $swing = if ($walking) { 4.5 } else { 2 }
+    $script:petRotate.Angle = [Math]::Sin($p.phase * 2.2) * $swing + $lean
     $script:petScale.ScaleX = $p.dir * $breath * $script:petSize
     $script:petScale.ScaleY = $breath * $script:petSize
 
-    # 跳跃抛物线
+    # 跳跃抛物线 / 走路弹跳 (上下起伏让步伐更生动)
     $jumpY = 0.0
     if ($p.anim -eq "jump") {
         $a = $script:anims["jump"]
         $prog = $p.aIdx / [Math]::Max(1, $a.F.Count - 1)
         $jumpY = -90 * [Math]::Sin([Math]::PI * $prog)
+    } elseif ($walking) {
+        $jumpY = -[Math]::Abs([Math]::Sin($p.phase * 2.8)) * 16
     }
 
     $y = $p.y + $jumpY
@@ -959,6 +986,7 @@ function Set-Panel([string]$name) {
     if ($name -eq "skills") { Update-SkillsPanel }
     if ($name -eq "restart") { Update-RestartPanel }
     if ($name -eq "home") { Update-OpenPanel }
+    if ($name -eq "setup") { Update-SetupPanel }
 }
 
 function Set-DotColor($dot, [string]$color) {
@@ -994,6 +1022,73 @@ function Update-RestartPanel {
         $restartDetail.Text = "当前没有服务在运行，点击「立即重启」将直接启动新实例。"
     }
     $restartLogBox.Text = Get-LogTail $ErrLog
+}
+
+# ------------------------------------------------------------ 环境装配(一键下载安装 DSH) ----
+function Test-Cmd([string]$name) {
+    $c = Get-Command $name -ErrorAction SilentlyContinue
+    if ($c) { return $c.Source }
+    return $null
+}
+
+function Get-DshState {
+    $cmd = Get-Command dsh -ErrorAction SilentlyContinue
+    if ($cmd) { return "已安装 ($($cmd.Source))" }
+    $global = Join-Path $env:APPDATA "npm\node_modules\@deepseek-ai\dsh\lib\bin.js"
+    if (Test-Path -LiteralPath $global) { return "已安装 (npm 全局)" }
+    if (Test-Path -LiteralPath $DshBin) { return "已安装 (npm 缓存)" }
+    return $null
+}
+
+function Update-SetupPanel {
+    $node = Test-Cmd "node"
+    $npm  = Test-Cmd "npm"
+    $dsh  = Get-DshState
+    $lines = @()
+    if ($node) { $lines += "node ✓ $node" } else { $lines += "node ✗ 未检测到（请先安装 Node.js: https://nodejs.org）" }
+    if ($npm)  { $lines += "npm  ✓ $npm" } else { $lines += "npm  ✗ 未检测到（随 Node.js 安装）" }
+    if ($dsh)  { $lines += "dsh  ✓ $dsh" } else { $lines += "dsh  ✗ 未安装 → 点「一键装配」自动下载安装" }
+    $setupState.Text = ($lines -join "`n")
+    if (-not $script:setupRunning) { $setupLogBox.Text = "" }
+}
+
+function Start-SetupDsh {
+    if ($script:setupRunning) { return }
+    if (-not (Test-Cmd "node")) {
+        $setupLogBox.Text = "未检测到 Node.js。请先到 https://nodejs.org 下载安装 LTS 版，再回来点一键装配。"
+        return
+    }
+    if (-not (Test-Cmd "npm")) {
+        $setupLogBox.Text = "npm 不可用，请重装 Node.js（安装包自带 npm）。"
+        return
+    }
+    $script:setupRunning = $true
+    $setupLogBox.Text = "开始安装 @deepseek-ai/dsh …（约 1-2 分钟，走 npmmirror 国内源）`n"
+    $logFile = Join-Path $env:TEMP "dsh-setup.log"
+    try { Remove-Item $logFile -Force -ErrorAction SilentlyContinue } catch { }
+    $cmdline = "npm install -g @deepseek-ai/dsh --registry=https://registry.npmmirror.com > `"$logFile`" 2>&1"
+    $script:setupProc = Start-Process cmd -ArgumentList '/c', $cmdline -WindowStyle Hidden -PassThru
+    $script:setupTimer = [System.Windows.Threading.DispatcherTimer]::new()
+    $script:setupTimer.Interval = [TimeSpan]::FromSeconds(2)
+    $script:setupTimer.Add_Tick({
+        if ($script:setupProc.HasExited) {
+            $script:setupTimer.Stop()
+            $script:setupRunning = $false
+            $tail = ""
+            try { $tail = (Get-Content -LiteralPath "$env:TEMP\dsh-setup.log" -Tail 8 -ErrorAction SilentlyContinue) -join "`n" } catch { }
+            $ok = (Get-DshState)
+            if ($ok) {
+                $setupLogBox.Text = "✓ 装配完成！DSH 已可用。`n$tail"
+                $setupState.Text = "dsh ✓ $ok"
+                Set-PetTalk "环境装好啦，随时可以开工~" $false $true
+            } else {
+                $setupLogBox.Text = "✗ 安装失败或未检测到 dsh，请看日志尾部：`n$tail"
+            }
+        } else {
+            try { $t = (Get-Content -LiteralPath "$env:TEMP\dsh-setup.log" -Tail 2 -ErrorAction SilentlyContinue) -join " "; $setupLogBox.Text = "安装中…`n$t" } catch { }
+        }
+    })
+    $script:setupTimer.Start()
 }
 
 function Add-EnvRow($label, $value) {
@@ -1223,18 +1318,46 @@ function Invoke-PetMenu([string]$tag) {
         "roam"   { $p.mode = "roam";   Set-PetTalk "好呀，我去溜达溜达~" }
         "follow" { $p.mode = "follow"; Set-PetTalk "我跟着你的鼠标走，嘿嘿~" }
         "stay"   { $p.mode = "stay";   Set-PetTalk "那我乖乖待着~" }
-        "feed"   { Set-PetAnim "jump" $false; Set-PetEmoji "🍪"; Set-PetTalk "哇，谢谢你！啊呜一口~" }
+        "feed" {
+            # 进食动作: 三连小跳(咀嚼感) + 🍪 持续显示
+            Set-PetEmoji "🍪"
+            Set-PetTalk "哇，谢谢你！啊呜一口~" $false $true
+            $script:feedCount = 3
+            if ($script:feedTimer) { $script:feedTimer.Stop() }
+            $script:feedTimer = [System.Windows.Threading.DispatcherTimer]::new()
+            $script:feedTimer.Interval = [TimeSpan]::FromMilliseconds(850)
+            $script:feedTimer.Add_Tick({
+                $script:feedCount--
+                if ($script:feedCount -lt 0) { $script:feedTimer.Stop() }
+                else { Set-PetAnim "jump" $false }
+            })
+            $script:feedTimer.Start()
+            Set-PetAnim "jump" $false
+        }
         "bigger" {
-            if ($script:petSize -lt 1.25) { $script:petSize += 0.10; Set-PetTalk "再大一点就抱不动啦~" }
+            if ($script:petSize -lt 1.25) { $script:petSize += 0.10; Save-PetCfg; Set-PetTalk "再大一点就抱不动啦~" }
         }
         "smaller" {
-            if ($script:petSize -gt 0.75) { $script:petSize -= 0.10; Set-PetTalk "变小一点，方便你干活~" }
+            if ($script:petSize -gt 0.75) { $script:petSize -= 0.10; Save-PetCfg; Set-PetTalk "变小一点，方便你干活~" }
         }
         "exit" { Set-PetTalk "再见啦~"; $window.Close() }
     }
 }
 
+# 桌宠大小: 持久化(关闭重开保持上次的大小)
 $script:petSize = 1.0
+try {
+    if (Test-Path -LiteralPath $PetCfgFile) {
+        $cfg = Get-Content -LiteralPath $PetCfgFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($cfg.petSize -and $cfg.petSize -ge 0.5 -and $cfg.petSize -le 1.6) { $script:petSize = [double]$cfg.petSize }
+    }
+} catch { }
+
+function Save-PetCfg {
+    try {
+        @{ petSize = $script:petSize } | ConvertTo-Json | Set-Content -LiteralPath $PetCfgFile -Encoding UTF8
+    } catch { }
+}
 $script:petMenu = [System.Windows.Controls.ContextMenu]::new()
 Add-PetMenuItem "🚶 散步模式" "roam" $script:petMenu | Out-Null
 Add-PetMenuItem "🖱 跟随鼠标" "follow" $script:petMenu | Out-Null
@@ -1278,6 +1401,7 @@ $window.FindName("BtnPetToggle").Add_Click({
 $window.FindName("NavHome").Add_Click({ Set-Panel "home" })
 $window.FindName("NavEnv").Add_Click({ Set-Panel "env" })
 $window.FindName("NavSkills").Add_Click({ Set-Panel "skills" })
+$window.FindName("NavSetup").Add_Click({ Set-Panel "setup" })
 $window.FindName("NavLogs").Add_Click({ if (Test-Path -LiteralPath $ErrLog) { Start-Process explorer.exe -ArgumentList "`"$ErrLog`"" } })
 $window.FindName("NavBackup").Add_Click({ if (Test-Path -LiteralPath $BackupsRoot) { Start-Process explorer.exe -ArgumentList "`"$BackupsRoot`"" } })
 $window.FindName("NavDshDir").Add_Click({ if (Test-Path -LiteralPath $DshHome) { Start-Process explorer.exe -ArgumentList "`"$DshHome`"" } })
@@ -1288,6 +1412,7 @@ $window.FindName("BtnRestart").Add_Click({ Set-Panel "restart" })
 $window.FindName("BtnDoRestart").Add_Click({ Start-RestartFlow $false })
 $window.FindName("BtnRestartOpen").Add_Click({ Start-RestartFlow $true })
 $window.FindName("BtnEnvRefresh").Add_Click({ Update-EnvPanel })
+$window.FindName("BtnSetupGo").Add_Click({ Start-SetupDsh })
 $window.FindName("BtnOpenSkillsDir").Add_Click({ if (Test-Path -LiteralPath $SkillsRoot) { Start-Process explorer.exe -ArgumentList "`"$SkillsRoot`"" } })
 
 # 桌宠气泡内的操作按钮
@@ -1446,10 +1571,12 @@ if ($Diag) {
     $t.Start()
 }
 
-# 主窗口关闭时同步关闭桌宠窗口并退出消息循环
+# 主窗口关闭时同步关闭桌宠窗口并强制退出
+# (BeginInvokeShutdown/ExitAllFrames/Environment.Exit 在此双窗口场景下都不可靠, 进程会残留;
+#  最小实验证实 Stop-Process 自身是唯一稳定退出方式)
 $window.Add_Closed({
-    $petWin.Close()
-    [System.Windows.Threading.Dispatcher]::CurrentDispatcher.BeginInvokeShutdown()
+    try { $petWin.Close() } catch { }
+    Stop-Process -Id $PID -Force
 })
 
 # 非模态双窗口: Show() 代替 ShowDialog(), 否则模态会禁用桌宠窗口的一切点击
