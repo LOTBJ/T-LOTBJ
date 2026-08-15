@@ -9,7 +9,7 @@
 # 素材署名: dsh-whale-girl-source.png 与 whale-assets/*.png 来自
 #           fornarwhal/deepseek-whale-girl-icon (CC BY-NC-SA 4.0, 非商用, 署名)
 # ============================================================================
-param([string]$Theme = "minimal", [switch]$HideConsole, [switch]$AutoTest, [switch]$Diag)
+param([string]$Theme = "minimal", [switch]$HideConsole, [switch]$AutoTest, [switch]$Diag, [switch]$NoBusy)
 
 if ($HideConsole) {
     Add-Type -MemberDefinition @"
@@ -754,6 +754,8 @@ $script:pet = @{
     talkCd  = 0
     fade    = 1.0
     emoji   = ""
+    feeding = $false
+    feedT   = 0
 }
 $script:petScale = [System.Windows.Media.ScaleTransform]::new(1, 1)
 $script:petRotate = [System.Windows.Media.RotateTransform]::new(0)
@@ -830,6 +832,16 @@ function Update-Pet {
         $p.emojiT--
         if ($p.emojiT -eq 0) { Set-PetEmoji "" }
     }
+    # 进食状态: 蹲吃 4.5 秒后回待机
+    if ($p.feeding) {
+        $p.feedT++
+        if ($p.feedT -gt 45) {
+            $p.feeding = $false
+            Set-PetAnim "idle"
+            $p.t = 0
+            $p.max = 40 + $script:rand.Next(40)
+        }
+    }
 
     # 帧推进 (注视时冻结动作帧)
     if ($script:petHasAtlas) {
@@ -857,11 +869,23 @@ function Update-Pet {
     $targetSpeed = 0.0
 
     if ($p.busy) {
-        # DSH 任务进行中 → 思考/检查动画(原地); 交互动画(wave/jump)优先, 播完再思考
-        if ($p.anim -ne "think" -and $p.anim -ne "review" -and $p.anim -ne "wave" -and $p.anim -ne "jump") {
+        # DSH 任务进行中 → 思考踱步: think/review 为主, 偶尔走两步(真移动); 交互动画优先
+        if ($p.anim -ne "think" -and $p.anim -ne "review" -and $p.anim -ne "wave" -and $p.anim -ne "jump" -and $p.anim -ne "right" -and $p.anim -ne "left") {
             if ($script:rand.Next(2) -eq 0) { Set-PetAnim "think" } else { Set-PetAnim "review" }
         }
-        $p.t = 0; $p.max = 1
+        if ($p.anim -eq "right" -or $p.anim -eq "left") {
+            $targetSpeed = 2.0
+            $p.walkT--
+            if ($p.walkT -le 0) { Set-PetAnim "think"; $p.t = 0; $p.max = 50 + $script:rand.Next(60) }
+        } elseif ($p.t -ge $p.max) {
+            $p.t = 0
+            $p.max = 50 + $script:rand.Next(60)
+            if ($script:rand.Next(3) -eq 0) {
+                $p.dir = if ($script:rand.Next(2) -eq 0) { 1 } else { -1 }
+                if ($p.dir -eq 1) { Set-PetAnim "right" } else { Set-PetAnim "left" }
+                $p.walkT = 15 + $script:rand.Next(15)
+            }
+        }
     } elseif ($p.drag) {
         $targetSpeed = 0.0
     } else {
@@ -873,21 +897,23 @@ function Update-Pet {
                         $p.dir = if ($script:rand.Next(2) -eq 0) { 1 } else { -1 }
                         if ($p.dir -eq 1) { Set-PetAnim "right" } else { Set-PetAnim "left" }
                         $p.t = 0
-                        $p.max = 40 + $script:rand.Next(50)
+                        $p.max = 25 + $script:rand.Next(35)
                     }
                 } else {
-                    $targetSpeed = 2.6
-                    if ($p.t -ge $p.max) { Set-PetAnim "idle"; $p.t = 0; $p.max = 30 + $script:rand.Next(40) }
+                    $targetSpeed = 2.8
+                    if ($p.t -ge $p.max) { Set-PetAnim "idle"; $p.t = 0; $p.max = 60 + $script:rand.Next(60) }
                 }
             }
             "follow" {
-                $pt = Get-PetMouse
-                $dx = ($pt.X - 135) - $p.x
-                if ([Math]::Abs($dx) -gt 50) {
+                $mp = [System.Windows.Forms.Cursor]::Position
+                $mx = $mp.X / $script:dpiScale
+                $targetLeft = $mx - 180
+                $dx = $targetLeft - $petWin.Left
+                if ([Math]::Abs($dx) -gt 24) {
                     $p.dir = if ($dx -gt 0) { 1 } else { -1 }
                     $name = if ($p.dir -eq 1) { "right" } else { "left" }
                     if ($p.anim -ne $name) { Set-PetAnim $name }
-                    $targetSpeed = [Math]::Min(3.6, [Math]::Abs($dx) / 60.0)
+                    $targetSpeed = [Math]::Min(4.2, [Math]::Abs($dx) / 50.0)
                 } else {
                     if ($p.anim -ne "idle") { Set-PetAnim "idle" }
                     Update-PetGaze
@@ -907,11 +933,14 @@ function Update-Pet {
     if ($p.speed -lt $targetSpeed) { $p.speed = [Math]::Min($targetSpeed, $p.speed + 0.35) }
     elseif ($p.speed -gt $targetSpeed) { $p.speed = [Math]::Max($targetSpeed, $p.speed - 0.35) }
 
-    # 移动 + 边界翻转(转身淡化)
+    # 窗口级真移动: 走路时移动桌宠窗口本身(Codex/大肥鱼式), 宠物在窗口内位置固定
     if ($p.speed -gt 0.05) {
-        $p.x += $p.dir * $p.speed
-        if ($p.x -lt 10 -or $p.x -gt 50) {
-            $p.x = [Math]::Max(30, [Math]::Min(640, $p.x))
+        $petWin.Left += $p.dir * $p.speed
+        $wa = [System.Windows.SystemParameters]::WorkArea
+        $minX = $wa.Left
+        $maxX = $wa.Right - $petWin.Width
+        if ($petWin.Left -lt $minX -or $petWin.Left -gt $maxX) {
+            $petWin.Left = [Math]::Max($minX, [Math]::Min($maxX, $petWin.Left))
             $p.dir = -$p.dir
             if ($p.dir -eq 1) { Set-PetAnim "right" } else { Set-PetAnim "left" }
             $p.fade = 0.5
@@ -925,8 +954,10 @@ function Update-Pet {
     $walking = ($p.anim -eq "right" -or $p.anim -eq "left")
     $swing = if ($walking) { 4.5 } else { 2 }
     $script:petRotate.Angle = [Math]::Sin($p.phase * 2.2) * $swing + $lean
-    $script:petScale.ScaleX = $p.dir * $breath * $script:petSize
-    $script:petScale.ScaleY = $breath * $script:petSize
+    # 进食咀嚼挤压: 身体随咀嚼微微压缩回弹
+    $chew = if ($p.feeding) { 1 - 0.045 * [Math]::Abs([Math]::Sin($p.phase * 7)) } else { 1 }
+    $script:petScale.ScaleX = $p.dir * $breath * $script:petSize * $chew
+    $script:petScale.ScaleY = $breath * $script:petSize * $chew
 
     # 跳跃抛物线 / 走路弹跳 (上下起伏让步伐更生动)
     $jumpY = 0.0
@@ -1083,6 +1114,7 @@ function Start-SetupDsh {
                 Set-PetTalk "环境装好啦，随时可以开工~" $false $true
             } else {
                 $setupLogBox.Text = "✗ 安装失败或未检测到 dsh，请看日志尾部：`n$tail"
+                Invoke-PetSad "呜…装配失败了，看看日志再试一次吧~"
             }
         } else {
             try { $t = (Get-Content -LiteralPath "$env:TEMP\dsh-setup.log" -Tail 2 -ErrorAction SilentlyContinue) -join " "; $setupLogBox.Text = "安装中…`n$t" } catch { }
@@ -1241,6 +1273,7 @@ function Start-RestartFlow([bool]$openBrowser) {
             $script:busy = $false
             $restartState.Text = "重启超时（可能已安全模式重试中）"
             $restartDetail.Text = Get-LogTail $ErrLog
+            Invoke-PetSad "呜…重启超时了，帮我看看日志嘛~"
         }
     })
     $script:restartPoll.Start()
@@ -1303,6 +1336,13 @@ function Invoke-PetJump {
     Set-PetEmoji "🎈"
 }
 
+# 失败动作模组(failed 动画 + 😵 + 台词): 装配/重启失败等场景调用
+function Invoke-PetSad([string]$text) {
+    Set-PetAnim "failed" $false
+    Set-PetEmoji "😵"
+    Set-PetTalk $text $false $true
+}
+
 function Add-PetMenuItem([string]$text, [string]$tag, [System.Windows.Controls.ContextMenu]$menu) {
     $mi = [System.Windows.Controls.MenuItem]::new()
     $mi.Header = $text
@@ -1319,20 +1359,12 @@ function Invoke-PetMenu([string]$tag) {
         "follow" { $p.mode = "follow"; Set-PetTalk "我跟着你的鼠标走，嘿嘿~" }
         "stay"   { $p.mode = "stay";   Set-PetTalk "那我乖乖待着~" }
         "feed" {
-            # 进食动作: 三连小跳(咀嚼感) + 🍪 持续显示
+            # 进食动作模组: wait(蹲坐) + 咀嚼挤压 + 🍪 持续, 4.5 秒后回待机
             Set-PetEmoji "🍪"
             Set-PetTalk "哇，谢谢你！啊呜一口~" $false $true
-            $script:feedCount = 3
-            if ($script:feedTimer) { $script:feedTimer.Stop() }
-            $script:feedTimer = [System.Windows.Threading.DispatcherTimer]::new()
-            $script:feedTimer.Interval = [TimeSpan]::FromMilliseconds(850)
-            $script:feedTimer.Add_Tick({
-                $script:feedCount--
-                if ($script:feedCount -lt 0) { $script:feedTimer.Stop() }
-                else { Set-PetAnim "jump" $false }
-            })
-            $script:feedTimer.Start()
-            Set-PetAnim "jump" $false
+            Set-PetAnim "wait" $true
+            $script:pet.feeding = $true
+            $script:pet.feedT = 0
         }
         "bigger" {
             if ($script:petSize -lt 1.25) { $script:petSize += 0.10; Save-PetCfg; Set-PetTalk "再大一点就抱不动啦~" }
@@ -1385,7 +1417,11 @@ $petHost.Add_MouseLeftButtonDown({
 })
 
 # ------------------------------------------------------------ 事件绑定 ----
-$window.FindName("BtnCloseMin").Add_Click({ $window.Close() })
+$window.FindName("BtnCloseMin").Add_Click({
+    # 关闭 = 隐藏到托盘(桌面端常驻, 桌宠继续陪伴); 托盘菜单里才是真退出
+    $window.Hide()
+    try { $script:tray.ShowBalloonTip(2000, "DeepSeek Harness", "已隐藏到托盘，桌宠继续陪伴~ 托盘菜单可退出。", [System.Windows.Forms.ToolTipIcon]::Info) } catch { }
+})
 $window.FindName("BtnMinMin").Add_Click({ $window.WindowState = [System.Windows.WindowState]::Minimized })
 $window.FindName("BtnPetToggle").Add_Click({
     if ($petWin.IsVisible) {
@@ -1438,10 +1474,81 @@ $petWin.FindName("ChipTalk").Add_Click({ Set-Speech ($script:talkLines | Get-Ran
 # 标题栏拖拽
 $window.FindName("MinBar").Add_MouseLeftButtonDown({ $window.DragMove() })
 
+# ------------------------------------------------------------ 托盘(桌面端常驻) ----
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+Add-Type -MemberDefinition @"
+[DllImport("user32.dll")] public static extern int GetWindowLong(System.IntPtr h, int i);
+[DllImport("user32.dll")] public static extern int SetWindowLong(System.IntPtr h, int i, int v);
+"@ -Name WinLong -Namespace DSH
+
+$script:clickThrough = $false
+$script:autoStart = $false
+$RunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+try { if (Get-ItemProperty -Path $RunKey -Name "DSHLauncher" -ErrorAction SilentlyContinue) { $script:autoStart = $true } } catch { }
+
+$script:tray = [System.Windows.Forms.NotifyIcon]::new()
+$script:tray.Text = "DeepSeek Harness"
+try { $script:tray.Icon = [System.Drawing.Icon]::new((Join-Path $ScriptDir "dsh-whale-girl.ico")) } catch { }
+$script:tray.Visible = $true
+
+$script:trayMenu = [System.Windows.Forms.ContextMenuStrip]::new()
+function Add-TrayItem([string]$text, [scriptblock]$action) {
+    $mi = [System.Windows.Forms.ToolStripMenuItem]::new()
+    $mi.Text = $text
+    $mi.Add_Click({ & $action })
+    $script:trayMenu.Items.Add($mi) | Out-Null
+    return $mi
+}
+
+Add-TrayItem "打开控制台" {
+    $window.Show()
+    $window.WindowState = [System.Windows.WindowState]::Normal
+    $window.Activate()
+} | Out-Null
+Add-TrayItem "显示/隐藏桌宠" {
+    if ($petWin.IsVisible) {
+        $petWin.Hide()
+        $window.FindName("BtnPetToggle").Content = "🐳 桌宠 关"
+    } else {
+        $petWin.Show()
+        $window.FindName("BtnPetToggle").Content = "🐳 桌宠 开"
+    }
+} | Out-Null
+$script:miThrough = Add-TrayItem "鼠标穿透桌宠: 关" {
+    $script:clickThrough = -not $script:clickThrough
+    $hwnd = ([System.Windows.Interop.WindowInteropHelper]::new($petWin)).Handle
+    $ex = [DSH.WinLong]::GetWindowLong($hwnd, -20)
+    if ($script:clickThrough) { $ex = $ex -bor 0x20 -bor 0x80000 } else { $ex = $ex -band (-bnot 0x20) }
+    [DSH.WinLong]::SetWindowLong($hwnd, -20, $ex) | Out-Null
+    $script:miThrough.Text = "鼠标穿透桌宠: " + $(if ($script:clickThrough) { "开" } else { "关" })
+}
+$script:miAutoStart = Add-TrayItem ("开机自启: " + $(if ($script:autoStart) { "开" } else { "关" })) {
+    $script:autoStart = -not $script:autoStart
+    try {
+        if ($script:autoStart) {
+            $cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + (Join-Path $ScriptDir 'dsh-launcher.ps1') + '" -HideConsole'
+            Set-ItemProperty -Path $RunKey -Name "DSHLauncher" -Value $cmd
+        } else {
+            Remove-ItemProperty -Path $RunKey -Name "DSHLauncher" -ErrorAction SilentlyContinue
+        }
+    } catch { }
+    $script:miAutoStart.Text = "开机自启: " + $(if ($script:autoStart) { "开" } else { "关" })
+}
+$script:trayMenu.Items.Add([System.Windows.Forms.ToolStripSeparator]::new()) | Out-Null
+Add-TrayItem "退出" { $window.Close() } | Out-Null
+$script:tray.ContextMenuStrip = $script:trayMenu
+$script:tray.Add_DoubleClick({
+    $window.Show()
+    $window.WindowState = [System.Windows.WindowState]::Normal
+    $window.Activate()
+})
+
 # ------------------------------------------------------------ DSH 会话活跃度联动 ----
 # sessions 目录最近 15s 内有写入 → 主人在忙: 桌宠切 think/review 动画
 # 忙完(持续>20s) → 跳跃庆祝 + 台词
 function Update-PetBusy {
+    if ($NoBusy) { $script:pet.busy = $false; return }
     $busy = $false
     if (Test-Path -LiteralPath $SessionsDir) {
         try {
@@ -1520,6 +1627,9 @@ Update-RestartPanel
 
 # 桌宠默认显示(独立透明置顶窗口), 可用主界面顶栏开关隐藏
 $petWin.Show()
+# DPI 比例: 鼠标物理坐标→逻辑坐标换算(窗口级移动用)
+$script:dpiScale = 1.0
+try { $script:dpiScale = [System.Windows.PresentationSource]::FromVisual($petWin).CompositionTarget.TransformToDevice.M11 } catch { }
 Set-Speech "你好呀，我是 DSH 的小鲸鱼助手~ 点我一下，看看我能帮你做什么？" $true 8000
 
 # 自动测试: 1.5秒模拟点击鲸鱼, 2.5秒验证"抛错不死"(L6防火墙), 6秒后自动关闭
