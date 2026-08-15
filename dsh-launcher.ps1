@@ -407,19 +407,18 @@ $xaml = @'
 
           <!-- 内容区 -->
           <Grid Grid.Row="1">
-            <!-- 首页 hero -->
-            <StackPanel x:Name="PanelHome" HorizontalAlignment="Center" VerticalAlignment="Center">
-              <Border CornerRadius="22" Background="#4DFFFFFF" Padding="18,8" HorizontalAlignment="Center">
+            <!-- 首页 hero (整体偏上) -->
+            <StackPanel x:Name="PanelHome" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-84,0,0">
+              <Border CornerRadius="22" Background="#4DFFFFFF" Padding="18,8" HorizontalAlignment="Center" Visibility="Collapsed">
                 <StackPanel Orientation="Horizontal">
                   <Ellipse x:Name="OpenDot" Width="9" Height="9" Fill="#F0A94A" VerticalAlignment="Center"/>
                   <TextBlock x:Name="OpenState" Text="正在检测服务…" Foreground="#1E232C" FontSize="13" Margin="8,0,0,0"/>
                   <TextBlock x:Name="OpenDetail" Text="" Foreground="#5A6172" FontSize="13" Margin="10,0,0,0" Visibility="Collapsed"/>
                 </StackPanel>
               </Border>
-              <TextBlock Text="深 度 求 索" Foreground="#152443" FontSize="40" FontWeight="Normal" HorizontalAlignment="Center" Margin="0,22,0,0"/>
-              <Image x:Name="HeroWhale" Width="96" Height="72" Stretch="Uniform" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5"/>
-              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,38,0,0">
-                <Button x:Name="BtnOpen" Style="{StaticResource PrimaryBtn}" Content="💬 开始对话" Height="50" Background="#4D6BFE" Padding="32,0"/>
+              <Image x:Name="HeroWhale" Width="96" Height="72" Stretch="Uniform" HorizontalAlignment="Center" RenderTransformOrigin="0.5,0.5"/>
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,30,0,0">
+                <Button x:Name="BtnOpen" Style="{StaticResource PrimaryBtn}" Content="💬 开始对话" Height="50" Background="#4D6BFE" Padding="44,0"/>
                 <Button x:Name="BtnRestart" Style="{StaticResource GhostBtn}" Content="↻ 重启服务" Height="50" Margin="14,0,0,0"/>
               </StackPanel>
               <TextBlock x:Name="OpenLogBox" Text="" Foreground="#5B6472" FontSize="11.5" FontFamily="Consolas" TextWrapping="Wrap" MaxHeight="96" Visibility="Collapsed"/>
@@ -528,7 +527,8 @@ $petXaml = @'
       </Setter>
     </Style>
   </Window.Resources>
-  <Canvas x:Name="PetStage" Background="Transparent">
+  <!-- 隐形底(alpha=1): 分层窗口透明像素会鼠标穿透, 加近乎全透明的底让全窗口可点击 -->
+  <Canvas x:Name="PetStage" Background="#01000000">
     <Grid x:Name="PetHost" Width="300" Height="330" RenderTransformOrigin="0.5,0.95" Cursor="SizeAll">
       <Image x:Name="PetImage" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Bottom"/>
     </Grid>
@@ -769,8 +769,8 @@ function Set-PetEmoji([string]$e) {
     else { $petEmoji.Visibility = [System.Windows.Visibility]::Collapsed }
 }
 
-function Set-PetTalk([string]$text, [bool]$showChips = $false) {
-    if ($script:pet.talkCd -gt 0) { return }
+function Set-PetTalk([string]$text, [bool]$showChips = $false, [bool]$force = $false) {
+    if (-not $force -and $script:pet.talkCd -gt 0) { return }
     Set-Speech $text $showChips
     $script:pet.talkCd = 40
 }
@@ -1198,7 +1198,7 @@ $script:pet.moved = $false
 
 function Invoke-PetClicked([bool]$force = $false) {
     if ($script:pet.drag) { return }
-    Set-PetTalk "怎么啦？想让我做什么？" $true
+    Set-PetTalk "怎么啦？想让我做什么？" $true $true
     Set-PetAnim "wave" $false
     Set-PetEmoji "👋"
 }
@@ -1254,8 +1254,10 @@ $petHost.Add_MouseLeftButtonDown({
     if ($e.ClickCount -ge 2) { Invoke-PetJump; return }
     $p.drag = $true
     $downAt = [DateTime]::Now
-    try { $petWin.DragMove() } catch { }
+    Add-Content -Path "$env:TEMP\dsh-pet-click.log" -Value ("MOUSEDOWN hit, clickcount=" + $e.ClickCount)
+    try { $petWin.DragMove() } catch { Add-Content -Path "$env:TEMP\dsh-pet-click.log" -Value ("DRAGMOVE-ERR: " + $_.Exception.Message) }
     $p.drag = $false
+    Add-Content -Path "$env:TEMP\dsh-pet-click.log" -Value ("MOUSEDOWN done, dur=" + [int]([DateTime]::Now - $downAt).TotalMilliseconds)
     if (([DateTime]::Now - $downAt).TotalMilliseconds -lt 220) { Invoke-PetClicked }
 })
 
@@ -1444,5 +1446,12 @@ if ($Diag) {
     $t.Start()
 }
 
-$window.ShowDialog() | Out-Null
-$petWin.Close()
+# 主窗口关闭时同步关闭桌宠窗口并退出消息循环
+$window.Add_Closed({
+    $petWin.Close()
+    [System.Windows.Threading.Dispatcher]::CurrentDispatcher.BeginInvokeShutdown()
+})
+
+# 非模态双窗口: Show() 代替 ShowDialog(), 否则模态会禁用桌宠窗口的一切点击
+$window.Show()
+[System.Windows.Threading.Dispatcher]::Run()
