@@ -95,7 +95,19 @@ if (-not $up) {
 }
 
 if ($up) {
-    Start-Process $Url
+    # 独立 Edge 实例(独立 profile + app 窗口), 不与日常 Edge 混用
+    $edge = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+    if (-not (Test-Path -LiteralPath $edge)) { $edge = 'C:\Program Files\Microsoft\Edge\Application\msedge.exe' }
+    $profile = Join-Path $env:USERPROFILE '.dsh\edge-dsh'
+    try {
+        if (Test-Path -LiteralPath $edge) {
+            Start-Process $edge -ArgumentList "--user-data-dir=`"$profile`"", "--app=$Url"
+        } else {
+            Start-Process $Url
+        }
+    } catch {
+        Start-Process $Url
+    }
 } else {
     Show-Message "DeepSeek Harness 启动失败，请查看日志：$ErrLog" 'DeepSeek Harness 启动失败'
 }

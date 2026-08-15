@@ -922,29 +922,41 @@ function Update-Pet {
     } else {
         switch ($p.mode) {
             "roam" {
-                # 目标点制漫游(大肥鱼式): 随机屏幕目标 → 走到 → 休息 8-18 秒 → 新目标
+                # 目标点制漫游(大肥鱼式, 低频版): 随机屏幕目标 → 走到 → 休息 12-24 秒(40% 概率续歇) → 新目标
                 if ($null -ne $p.targetX) {
                     $dx = $p.targetX - $petWin.Left
                     if ([Math]::Abs($dx) -lt 16) {
                         $p.targetX = $null
                         Set-PetAnim "idle"
                         $p.t = 0
-                        $p.max = 80 + $script:rand.Next(100)
+                        $p.max = 120 + $script:rand.Next(120)
                     } else {
                         $p.dir = if ($dx -gt 0) { 1 } else { -1 }
                         $name = if ($p.dir -eq 1) { "right" } else { "left" }
                         if ($p.anim -ne $name) { Set-PetAnim $name }
-                        $targetSpeed = 2.8
+                        $targetSpeed = 2.2
                         # 走路中偶尔小跳一下(可爱细节)
                         if ($script:rand.Next(500) -eq 0) { $p.hopT = 8 }
                     }
                 } elseif ($p.anim -eq "idle") {
                     Update-PetGaze
                     Maybe-IdleAction
-                    if ($null -eq $p.gaze -and $p.t -ge $p.max) {
-                        $wa2 = [System.Windows.SystemParameters]::WorkArea
-                        $range = [Math]::Max(1, [int]($wa2.Right - $wa2.Left - $petWin.Width - 60))
-                        $p.targetX = $wa2.Left + 30 + $script:rand.Next($range)
+                    # 注视只是显示层(Codex 原版 modeDeadline 到点照样走, 不冻结漫游)
+                    if ($p.t -ge $p.max) {
+                        # 40% 概率继续歇着(降频), 否则选屏幕内随机目标
+                        if ($script:rand.Next(100) -lt 40) {
+                            $p.t = 0
+                            $p.max = 120 + $script:rand.Next(120)
+                        } else {
+                            # 短途散步: 目标在当前位置 ±500 逻辑像素内(WorkArea 物理→逻辑换算), 不长途奔袭
+                            $wa2 = [System.Windows.SystemParameters]::WorkArea
+                            $minX2 = $wa2.Left / $script:dpiScale
+                            $maxX2 = $wa2.Right / $script:dpiScale - $petWin.Width
+                            $lo = [Math]::Max($minX2, $petWin.Left - 500)
+                            $hi = [Math]::Min($maxX2, $petWin.Left + 500)
+                            if ($hi - $lo -gt 40) { $p.targetX = $lo + $script:rand.Next([int]($hi - $lo)) }
+                            else { $p.targetX = $lo }
+                        }
                     }
                 }
             }
@@ -981,13 +993,17 @@ function Update-Pet {
     # 窗口级真移动: 走路时移动桌宠窗口本身(Codex/大肥鱼式), 宠物在窗口内位置固定
     if ($p.speed -gt 0.05) {
         $petWin.Left += $p.dir * $p.speed
+        # WorkArea 返回物理像素, petWin.Left 是逻辑坐标 → 用 dpiScale 统一换算
         $wa = [System.Windows.SystemParameters]::WorkArea
-        $minX = $wa.Left
-        $maxX = $wa.Right - $petWin.Width
-        if ($petWin.Left -lt $minX -or $petWin.Left -gt $maxX) {
+        $minX = $wa.Left / $script:dpiScale
+        $maxX = $wa.Right / $script:dpiScale - $petWin.Width
+        if ($petWin.Left -le $minX -or $petWin.Left -ge $maxX) {
+            # 碰边界: clamp + 视为到达(清除目标, 回去休息) —— 否则目标在边界外会永远走不到、一直撞墙
             $petWin.Left = [Math]::Max($minX, [Math]::Min($maxX, $petWin.Left))
-            $p.dir = -$p.dir
-            if ($p.dir -eq 1) { Set-PetAnim "right" } else { Set-PetAnim "left" }
+            $p.targetX = $null
+            Set-PetAnim "idle"
+            $p.t = 0
+            $p.max = 100 + $script:rand.Next(100)
             $p.fade = 0.5
         }
     }
@@ -1267,13 +1283,29 @@ function Update-SkillsPanel {
 }
 
 # ------------------------------------------------------------ 动作流程 ----
+# 打开 DSH 界面: 独立 Edge 实例(独立 profile + app 窗口), 不和使用中的 Edge 混在一起
+function Start-DshUrl {
+    $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+    if (-not (Test-Path -LiteralPath $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
+    $profile = Join-Path $DshHome "edge-dsh"
+    try {
+        if (Test-Path -LiteralPath $edge) {
+            Start-Process $edge -ArgumentList "--user-data-dir=`"$profile`"", "--app=$Url"
+        } else {
+            Start-DshUrl
+        }
+    } catch {
+        Start-DshUrl
+    }
+}
+
 function Start-OpenFlow {
     if ($script:busy) { return }
     $script:busy = $true
     $openState.Text = "正在打开…"
     $openDetail.Text = "如果服务未运行，将自动启动（约 5-15 秒）"
     if (Test-ServerUp) {
-        Start-Process $Url
+        Start-DshUrl
         $openState.Text = "已打开浏览器"
         $script:busy = $false
         return
@@ -1293,7 +1325,7 @@ function Start-OpenFlow {
         if (Test-ServerUp) {
             $script:openPoll.Stop()
             $script:busy = $false
-            Start-Process $Url
+            Start-DshUrl
             Update-OpenPanel
             Update-StatusAll
             $openState.Text = "服务已启动并打开浏览器"
@@ -1330,7 +1362,7 @@ function Start-RestartFlow([bool]$openBrowser) {
             Update-RestartPanel
             Update-StatusAll
             $restartState.Text = "重启完成 ✓"
-            if ($openBrowser) { Start-Process $Url }
+            if ($openBrowser) { Start-DshUrl }
         } elseif ($script:restartWaited -gt 45) {
             $script:restartPoll.Stop()
             $script:busy = $false
@@ -1732,7 +1764,7 @@ function Update-PetBusy {
             if ($script:hasNvidiaSmi) {
                 $temp = (& nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>$null | Select-Object -First 1)
                 if ($temp -match '^\s*(\d+)' -and [int]$matches[1] -gt 80) {
-                    Set-PetTalk "我感觉我的鱼鳍快熟了 (GPU {0}°C)~" -f $matches[1]
+                    Set-PetTalk ("我感觉我的鱼鳍快熟了 (GPU {0}°C)~" -f $matches[1])
                 }
             }
         } catch { }
