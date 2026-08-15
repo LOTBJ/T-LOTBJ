@@ -1,11 +1,11 @@
 ﻿# ============================================================================
-# DeepSeek Harness 启动器 (WPF 双主题: 极简 / 鲸鱼娘)
+# DeepSeek Harness 启动器 (WPF 官网风格控制台 + 独立透明桌宠)
 # 用法: powershell -NoProfile -ExecutionPolicy Bypass -File dsh-launcher.ps1
-#       可选参数: -Theme whale | minimal  启动界面 (默认 minimal)
-#                -HideConsole  启动后隐藏控制台窗口(桌面快捷键使用)
-#                -AutoTest     自动测试: 1秒后模拟点击鲸鱼, 6秒后自动关闭
-# 功能: 打开 / 重启 / 环境状态 / 技能库 / 日志 / 备份目录 / 主题切换
-#       桌宠: 散步/转身/跳跃/睡觉/开心/思考/闲聊 + 表情气泡 + 台词
+#       可选参数: -HideConsole  启动后隐藏控制台窗口(桌面快捷键使用)
+#                -AutoTest     自动测试: 1.5秒模拟点击鲸鱼, 6秒后自动关闭
+# 功能: 打开 / 重启 / 环境状态 / 技能库 / 日志 / 备份目录
+#       桌宠: 独立透明置顶窗口(可拖到桌面任意位置) · 拖拽移动/双击跳/右键菜单
+#             三模式(散步/跟随鼠标/待着) · 气泡跟随+可变 · DSH 会话联动
 # 素材署名: dsh-whale-girl-source.png 与 whale-assets/*.png 来自
 #           fornarwhal/deepseek-whale-girl-icon (CC BY-NC-SA 4.0, 非商用, 署名)
 # ============================================================================
@@ -271,9 +271,9 @@ $xaml = @'
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="24" Background="{TemplateBinding Background}">
+            <Border x:Name="bd" CornerRadius="6" Background="{TemplateBinding Background}">
               <Border.Effect>
-                <DropShadowEffect BlurRadius="16" ShadowDepth="3" Opacity="0.3" Color="#3D5BEE"/>
+                <DropShadowEffect BlurRadius="14" ShadowDepth="3" Opacity="0.28" Color="#3D5BEE"/>
               </Border.Effect>
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
@@ -298,7 +298,7 @@ $xaml = @'
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="24" Background="#61FFFFFF" BorderBrush="#8CFFFFFF" BorderThickness="{TemplateBinding BorderThickness}">
+            <Border x:Name="bd" CornerRadius="6" Background="#61FFFFFF" BorderBrush="#8CFFFFFF" BorderThickness="{TemplateBinding BorderThickness}">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24,10"/>
             </Border>
             <ControlTemplate.Triggers>
@@ -399,7 +399,7 @@ $xaml = @'
               </Border>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-              <Button x:Name="BtnToWhale" Style="{StaticResource GlassPill}" Content="🐳 鲸鱼娘" ToolTip="切换到鲸鱼娘界面" Margin="0,0,8,0"/>
+              <Button x:Name="BtnPetToggle" Style="{StaticResource GlassPill}" Content="🐳 桌宠 开" ToolTip="显示/隐藏桌宠" Margin="0,0,8,0"/>
               <Button x:Name="BtnMinMin" Style="{StaticResource GlassPill}" Content="—" Width="36" ToolTip="最小化" Margin="0,0,8,0"/>
               <Button x:Name="BtnCloseMin" Style="{StaticResource GlassPill}" Content="✕" Width="36" ToolTip="退出"/>
             </StackPanel>
@@ -418,17 +418,11 @@ $xaml = @'
               </Border>
               <TextBlock Text="深 度 求 索" Foreground="#152443" FontSize="40" FontWeight="Normal" HorizontalAlignment="Center" Margin="0,22,0,0"/>
               <Image x:Name="HeroWhale" Width="96" Height="72" Stretch="Uniform" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5"/>
-              <TextBlock Text="本地 AI 服务 · 一键运行 · 数据不出本机" Foreground="#5A6172" FontSize="14" HorizontalAlignment="Center" Margin="0,10,0,0"/>
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,38,0,0">
                 <Button x:Name="BtnOpen" Style="{StaticResource PrimaryBtn}" Content="💬 开始对话" Height="50" Background="#4D6BFE" Padding="32,0"/>
                 <Button x:Name="BtnRestart" Style="{StaticResource GhostBtn}" Content="↻ 重启服务" Height="50" Margin="14,0,0,0"/>
               </StackPanel>
-              <Border CornerRadius="18" Background="#73FFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="16,12" Margin="0,34,0,0" Width="500">
-                <StackPanel>
-                  <TextBlock Text="最近输出" Foreground="#6B7280" FontSize="11" Margin="0,0,0,6"/>
-                  <TextBlock x:Name="OpenLogBox" Text="" Foreground="#5B6472" FontSize="11.5" FontFamily="Consolas" TextWrapping="Wrap" MaxHeight="96"/>
-                </StackPanel>
-              </Border>
+              <TextBlock x:Name="OpenLogBox" Text="" Foreground="#5B6472" FontSize="11.5" FontFamily="Consolas" TextWrapping="Wrap" MaxHeight="96" Visibility="Collapsed"/>
             </StackPanel>
 
             <!-- 环境面板 -->
@@ -496,92 +490,69 @@ $xaml = @'
           </StackPanel>
         </Grid>
       </Grid>
-
-      <!-- ============================ 鲸鱼娘视图 ============================ -->
-      <Grid x:Name="ViewWhale" Visibility="Collapsed">
-        <!-- 深海渐变背景(替换位图) + 水纹光斑 -->
-        <Grid>
-          <Grid.Background>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-              <GradientStop Color="#0A2A52" Offset="0"/>
-              <GradientStop Color="#0E4478" Offset="0.45"/>
-              <GradientStop Color="#176CA6" Offset="0.78"/>
-              <GradientStop Color="#2E8FC4" Offset="1"/>
-            </LinearGradientBrush>
-          </Grid.Background>
-        </Grid>
-        <Ellipse Width="360" Height="170" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="60,-40,0,0" IsHitTestVisible="False">
-          <Ellipse.Fill>
-            <RadialGradientBrush>
-              <GradientStop Color="#2EFFFFFF" Offset="0"/>
-              <GradientStop Color="#00FFFFFF" Offset="1"/>
-            </RadialGradientBrush>
-          </Ellipse.Fill>
-        </Ellipse>
-        <Ellipse Width="460" Height="200" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,20,-80,0" IsHitTestVisible="False">
-          <Ellipse.Fill>
-            <RadialGradientBrush>
-              <GradientStop Color="#2278D8FF" Offset="0"/>
-              <GradientStop Color="#00FFFFFF" Offset="1"/>
-            </RadialGradientBrush>
-          </Ellipse.Fill>
-        </Ellipse>
-        <Canvas x:Name="BubbleCanvas"/>
-
-        <Grid>
-          <Grid.RowDefinitions>
-            <RowDefinition Height="60"/>
-            <RowDefinition Height="*"/>
-          </Grid.RowDefinitions>
-
-          <Grid x:Name="WhaleTitleBar" Grid.Row="0" Margin="24,0,18,0" Cursor="SizeAll">
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-              <Border CornerRadius="100" Background="#26FFFFFF" Padding="14,6">
-                <StackPanel Orientation="Horizontal">
-                  <Ellipse x:Name="WhaleStatusDot" Width="8" Height="8" Fill="#F0A94A" VerticalAlignment="Center"/>
-                  <TextBlock x:Name="WhaleStatusText" Text="检测中…" Foreground="#EAF4FF" FontSize="12" Margin="7,0,0,0" VerticalAlignment="Center"/>
-                </StackPanel>
-              </Border>
-            </StackPanel>
-            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
-              <Button x:Name="BtnToMinimal" Style="{StaticResource GlassPill}" Content="⇄ 极简模式" FontSize="12" Foreground="#EAF4FF" Margin="0,0,8,0"/>
-              <Button x:Name="BtnMinWhale" Style="{StaticResource GlassPill}" Content="—" Width="36" Foreground="#EAF4FF" Margin="0,0,8,0"/>
-              <Button x:Name="BtnCloseWhale" Style="{StaticResource GlassPill}" Content="✕" Width="36" Foreground="#EAF4FF"/>
-            </StackPanel>
-          </Grid>
-
-          <Grid Grid.Row="1">
-            <!-- 桌宠舞台: 桌宠 + 跟随气泡(白底蓝边+尾巴, 随人物移动/可变) -->
-            <Canvas x:Name="PetStage" Panel.ZIndex="1">
-              <Grid x:Name="PetHost" Width="300" Height="330" RenderTransformOrigin="0.5,0.95" Cursor="Hand">
-                <Image x:Name="PetImage" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Bottom"/>
-              </Grid>
-              <TextBlock x:Name="PetEmoji" FontFamily="Segoe UI Emoji" FontSize="26" Foreground="White" Panel.ZIndex="2"/>
-              <StackPanel x:Name="BubbleRoot" Panel.ZIndex="5" Width="320" Opacity="0">
-                <Border x:Name="SpeechBubble" CornerRadius="14" Background="#FFFFFF" BorderBrush="#7AA8F0" BorderThickness="2" Padding="14,11" HorizontalAlignment="Center" MaxWidth="300">
-                  <Border.Effect>
-                    <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.22" Color="#1F2A44"/>
-                  </Border.Effect>
-                  <StackPanel>
-                    <TextBlock x:Name="SpeechText" Text="你好呀，我是 DSH 的小鲸鱼助手~" Foreground="#1F2A44" FontSize="13.5" FontWeight="SemiBold" TextWrapping="Wrap" LineHeight="22"/>
-                    <WrapPanel x:Name="SpeechChips" Margin="0,10,0,0" Visibility="Collapsed">
-                      <Button x:Name="ChipOpen" Style="{StaticResource MiniChip}" Content="▶ 打开" FontSize="12" Margin="0,0,6,6"/>
-                      <Button x:Name="ChipRestart" Style="{StaticResource MiniChip}" Content="↻ 重启" FontSize="12" Margin="0,0,6,6"/>
-                      <Button x:Name="ChipEnv" Style="{StaticResource MiniChip}" Content="◎ 环境" FontSize="12" Margin="0,0,6,6"/>
-                      <Button x:Name="ChipSkills" Style="{StaticResource MiniChip}" Content="▤ 技能库" FontSize="12" Margin="0,0,6,6"/>
-                      <Button x:Name="ChipPet" Style="{StaticResource MiniChip}" Content="✋ 摸一摸" FontSize="12" Margin="0,0,6,6"/>
-                      <Button x:Name="ChipTalk" Style="{StaticResource MiniChip}" Content="💬 说说话" FontSize="12" Margin="0,0,6,6"/>
-                    </WrapPanel>
-                  </StackPanel>
-                </Border>
-                <Polygon x:Name="BubbleTail" Points="0,0 16,0 8,10" Fill="White" HorizontalAlignment="Center" Margin="0,-3,0,0"/>
-              </StackPanel>
-            </Canvas>
-          </Grid>
-        </Grid>
-      </Grid>
     </Grid>
   </Border>
+</Window>
+'@
+
+# ------------------------------------------------------------ 桌宠窗口(独立透明置顶, 借鉴大肥鱼/Desktop-Pet) ----
+$petXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DSH 桌宠" Width="360" Height="430"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
+        WindowStartupLocation="Manual" Left="920" Top="380">
+  <Window.Resources>
+    <Style x:Key="MiniChip" TargetType="Button">
+      <Setter Property="Foreground" Value="#3F6FE0"/>
+      <Setter Property="FontFamily" Value="Microsoft YaHei UI"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="bd" CornerRadius="100" Background="#EDF3FF" Padding="13,6">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="#D9E6FF"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="#C7DAFF"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+  <Canvas x:Name="PetStage" Background="Transparent">
+    <Grid x:Name="PetHost" Width="300" Height="330" RenderTransformOrigin="0.5,0.95" Cursor="SizeAll">
+      <Image x:Name="PetImage" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Bottom"/>
+    </Grid>
+    <TextBlock x:Name="PetEmoji" FontFamily="Segoe UI Emoji" FontSize="26" Foreground="#1F2A44" Panel.ZIndex="2"/>
+    <StackPanel x:Name="BubbleRoot" Panel.ZIndex="5" Width="320" Opacity="0">
+      <Border x:Name="SpeechBubble" CornerRadius="14" Background="#FFFFFF" BorderBrush="#7AA8F0" BorderThickness="2" Padding="14,11" HorizontalAlignment="Center" MaxWidth="300">
+        <Border.Effect>
+          <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.22" Color="#1F2A44"/>
+        </Border.Effect>
+        <StackPanel>
+          <TextBlock x:Name="SpeechText" Text="你好呀，我是 DSH 的小鲸鱼助手~" Foreground="#1F2A44" FontSize="13.5" FontWeight="SemiBold" TextWrapping="Wrap" LineHeight="22"/>
+          <WrapPanel x:Name="SpeechChips" Margin="0,10,0,0" Visibility="Collapsed">
+            <Button x:Name="ChipOpen" Style="{StaticResource MiniChip}" Content="▶ 打开" FontSize="12" Margin="0,0,6,6"/>
+            <Button x:Name="ChipRestart" Style="{StaticResource MiniChip}" Content="↻ 重启" FontSize="12" Margin="0,0,6,6"/>
+            <Button x:Name="ChipEnv" Style="{StaticResource MiniChip}" Content="◎ 环境" FontSize="12" Margin="0,0,6,6"/>
+            <Button x:Name="ChipSkills" Style="{StaticResource MiniChip}" Content="▤ 技能库" FontSize="12" Margin="0,0,6,6"/>
+            <Button x:Name="ChipPet" Style="{StaticResource MiniChip}" Content="✋ 摸一摸" FontSize="12" Margin="0,0,6,6"/>
+            <Button x:Name="ChipTalk" Style="{StaticResource MiniChip}" Content="💬 说说话" FontSize="12" Margin="0,0,6,6"/>
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+      <Polygon x:Name="BubbleTail" Points="0,0 16,0 8,10" Fill="White" HorizontalAlignment="Center" Margin="0,-3,0,0"/>
+    </StackPanel>
+  </Canvas>
 </Window>
 '@
 
@@ -589,6 +560,20 @@ $xaml = @'
 $xml = [xml]$xaml
 $reader = [System.Xml.XmlNodeReader]::new($xml)
 $window = [System.Windows.Markup.XamlReader]::Load($reader)
+
+# 桌宠独立窗口
+$petWinXml = [xml]$petXaml
+$petWinReader = [System.Xml.XmlNodeReader]::new($petWinXml)
+$petWin = [System.Windows.Markup.XamlReader]::Load($petWinReader)
+$petWin.ShowInTaskbar = $false
+$petWin.Topmost = $true
+$petWin.Dispatcher.Add_UnhandledException({
+    param($s, $e)
+    try {
+        Add-Content -Path "$env:TEMP\dsh-launcher-errors.log" -Value ("PET-ERR " + [DateTime]::Now.ToString("yyyy-MM-dd HH:mm:ss") + ": " + $e.Exception.Message)
+    } catch { }
+    $e.Handled = $true
+})
 
 # 防火墙 L6: 事件处理器内任何异常不再崩掉整个进程(此前"用着用着窗口消失"的根因)
 # 捕获后写日志 + Handled=true, 窗口继续存活
@@ -612,13 +597,8 @@ try {
     Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("IMG-ERR: " + $_.Exception.Message)
 }
 
-$winMin = $window.FindName("ViewMinimal")
-$winWhale = $window.FindName("ViewWhale")
-
 $minStatusDot    = $window.FindName("MinStatusDot")
 $minStatusText   = $window.FindName("MinStatusText")
-$whaleStatusDot  = $window.FindName("WhaleStatusDot")
-$whaleStatusText = $window.FindName("WhaleStatusText")
 $openDot   = $window.FindName("OpenDot")
 $openState = $window.FindName("OpenState")
 $openDetail = $window.FindName("OpenDetail")
@@ -630,14 +610,15 @@ $restartLogBox = $window.FindName("RestartLogBox")
 $envRows = $window.FindName("EnvRows")
 $skillCards = $window.FindName("SkillCards")
 $skillCountText = $window.FindName("SkillCountText")
-$speechText = $window.FindName("SpeechText")
-$speechChips = $window.FindName("SpeechChips")
-$bubbleRoot = $window.FindName("BubbleRoot")
-$petStage = $window.FindName("PetStage")
-$petHost  = $window.FindName("PetHost")
-$petImage = $window.FindName("PetImage")
-$petEmoji = $window.FindName("PetEmoji")
-$bubbleCanvas = $window.FindName("BubbleCanvas")
+
+# 桌宠窗口元素
+$speechText = $petWin.FindName("SpeechText")
+$speechChips = $petWin.FindName("SpeechChips")
+$bubbleRoot = $petWin.FindName("BubbleRoot")
+$petStage = $petWin.FindName("PetStage")
+$petHost  = $petWin.FindName("PetHost")
+$petImage = $petWin.FindName("PetImage")
+$petEmoji = $petWin.FindName("PetEmoji")
 
 $panels = @{
     home    = $window.FindName("PanelHome")
@@ -735,8 +716,8 @@ $script:pet = @{
     aIdx    = 0
     aNext   = 0
     aLoop   = $true
-    x       = 420.0
-    y       = 258.0
+    x       = 30.0
+    y       = 96.0
     dir     = 1
     speed   = 0.0
     t       = 0
@@ -906,7 +887,7 @@ function Update-Pet {
     # 移动 + 边界翻转(转身淡化)
     if ($p.speed -gt 0.05) {
         $p.x += $p.dir * $p.speed
-        if ($p.x -lt 30 -or $p.x -gt 640) {
+        if ($p.x -lt 10 -or $p.x -gt 50) {
             $p.x = [Math]::Max(30, [Math]::Min(640, $p.x))
             $p.dir = -$p.dir
             if ($p.dir -eq 1) { Set-PetAnim "right" } else { Set-PetAnim "left" }
@@ -945,7 +926,7 @@ function Update-Pet {
         $bh = $bubbleRoot.ActualHeight
         if ($bh -lt 10) { $bh = 60 }
         $bx = $p.x + 150 - $bw / 2
-        $bx = [Math]::Max(10, [Math]::Min(650, $bx))
+        $bx = [Math]::Max(6, [Math]::Min(34, $bx))
         $by = $y + 30 - $bh
         $by = [Math]::Max(8, $by)
         [System.Windows.Controls.Canvas]::SetLeft($bubbleRoot, $bx)
@@ -1177,8 +1158,6 @@ function Update-StatusAll {
     else { $color = "#F0A94A"; $text = "未运行" }
     Set-DotColor $minStatusDot $color
     $minStatusText.Text = $text
-    Set-DotColor $whaleStatusDot $color
-    $whaleStatusText.Text = $text
 }
 
 # ------------------------------------------------------------ 鲸鱼互动 ----
@@ -1268,55 +1247,29 @@ $script:petMenu.Items.Add([System.Windows.Controls.Separator]::new()) | Out-Null
 Add-PetMenuItem "👋 退出" "exit" $script:petMenu | Out-Null
 $petHost.ContextMenu = $script:petMenu
 
-# 拖拽(侧身) + 双击跳 + 单击挥手 + 右键菜单
+# 桌宠窗口交互: 双击跳 / 按住拖整窗(大肥鱼·Desktop-Pet 同款 DragMove) / 短按=单击挥手 / 右键菜单
 $petHost.Add_MouseLeftButtonDown({
     param($s, $e)
     $p = $script:pet
     if ($e.ClickCount -ge 2) { Invoke-PetJump; return }
     $p.drag = $true
-    $p.moved = $false
-    $pt = Get-PetMouse
-    $p.downX = $pt.X - $p.x
-    $p.downY = $pt.Y - $p.y
-    $petHost.CaptureMouse() | Out-Null
-})
-$petHost.Add_MouseMove({
-    param($s, $e)
-    $p = $script:pet
-    if (-not $p.drag) { return }
-    $pt = Get-PetMouse
-    $p.x = [Math]::Max(10, [Math]::Min(680, $pt.X - $p.downX))
-    $p.y = [Math]::Max(120, [Math]::Min(330, $pt.Y - $p.downY))
-    if ([Math]::Abs($pt.X - $p.downX - $p.x) -gt 6) { $p.moved = $true }
-})
-$petHost.Add_MouseLeftButtonUp({
-    param($s, $e)
-    $p = $script:pet
-    if (-not $p.drag) { return }
+    $downAt = [DateTime]::Now
+    try { $petWin.DragMove() } catch { }
     $p.drag = $false
-    $petHost.ReleaseMouseCapture() | Out-Null
-    Set-PetAnim "idle"
-    if (-not $p.moved) { Invoke-PetClicked }
-    $p.moved = $false
+    if (([DateTime]::Now - $downAt).TotalMilliseconds -lt 220) { Invoke-PetClicked }
 })
 
 # ------------------------------------------------------------ 事件绑定 ----
 $window.FindName("BtnCloseMin").Add_Click({ $window.Close() })
-$window.FindName("BtnCloseWhale").Add_Click({ $window.Close() })
 $window.FindName("BtnMinMin").Add_Click({ $window.WindowState = [System.Windows.WindowState]::Minimized })
-$window.FindName("BtnMinWhale").Add_Click({ $window.WindowState = [System.Windows.WindowState]::Minimized })
-$window.FindName("BtnToWhale").Add_Click({
-    $winMin.Visibility = [System.Windows.Visibility]::Collapsed
-    $winWhale.Visibility = [System.Windows.Visibility]::Visible
-    Set-Speech "你好呀，我是 DSH 的小鲸鱼助手~ 点我一下，看看我能帮你做什么？" $true 8000
-    Set-PetAnim "idle"
-    Set-PetEmoji ""
-})
-$window.FindName("BtnToMinimal").Add_Click({
-    $winWhale.Visibility = [System.Windows.Visibility]::Collapsed
-    $winMin.Visibility = [System.Windows.Visibility]::Visible
-    Hide-Bubble
-    Update-StatusAll
+$window.FindName("BtnPetToggle").Add_Click({
+    if ($petWin.IsVisible) {
+        $petWin.Hide()
+        $window.FindName("BtnPetToggle").Content = "🐳 桌宠 关"
+    } else {
+        $petWin.Show()
+        $window.FindName("BtnPetToggle").Content = "🐳 桌宠 开"
+    }
 })
 
 # 导航
@@ -1335,29 +1288,28 @@ $window.FindName("BtnRestartOpen").Add_Click({ Start-RestartFlow $true })
 $window.FindName("BtnEnvRefresh").Add_Click({ Update-EnvPanel })
 $window.FindName("BtnOpenSkillsDir").Add_Click({ if (Test-Path -LiteralPath $SkillsRoot) { Start-Process explorer.exe -ArgumentList "`"$SkillsRoot`"" } })
 
-# 桌宠互动 (拖拽/双击/右键 绑定在桌宠交互区)
-$window.FindName("ChipOpen").Add_Click({ Set-Speech "好嘞，这就帮你打开~"; Start-OpenFlow })
-$window.FindName("ChipRestart").Add_Click({ Set-Speech "收到，正在重启，等我一下下~"; Start-RestartFlow $true })
-$window.FindName("ChipEnv").Add_Click({
-    Set-Speech "环境信息在极简界面里更清楚，这就带你过去~"
-    $winWhale.Visibility = [System.Windows.Visibility]::Collapsed
-    $winMin.Visibility = [System.Windows.Visibility]::Visible
+# 桌宠气泡内的操作按钮
+$petWin.FindName("ChipOpen").Add_Click({ Set-Speech "好嘞，这就帮你打开~"; Start-OpenFlow })
+$petWin.FindName("ChipRestart").Add_Click({ Set-Speech "收到，正在重启，等我一下下~"; Start-RestartFlow $true })
+$petWin.FindName("ChipEnv").Add_Click({
+    Set-Speech "环境信息在控制台里更清楚，这就带你过去~"
+    $window.WindowState = [System.Windows.WindowState]::Normal
+    $window.Activate()
     Set-Panel "env"
     Update-StatusAll
 })
-$window.FindName("ChipSkills").Add_Click({
+$petWin.FindName("ChipSkills").Add_Click({
     Set-Speech "技能库走这边，看看新朋友~"
-    $winWhale.Visibility = [System.Windows.Visibility]::Collapsed
-    $winMin.Visibility = [System.Windows.Visibility]::Visible
+    $window.WindowState = [System.Windows.WindowState]::Normal
+    $window.Activate()
     Set-Panel "skills"
     Update-StatusAll
 })
-$window.FindName("ChipPet").Add_Click({ Set-Speech ($script:petLines | Get-Random); Set-PetAnim "wave" $false; Set-PetEmoji "😊" })
-$window.FindName("ChipTalk").Add_Click({ Set-Speech ($script:talkLines | Get-Random) })
+$petWin.FindName("ChipPet").Add_Click({ Set-Speech ($script:petLines | Get-Random); Set-PetAnim "wave" $false; Set-PetEmoji "😊" })
+$petWin.FindName("ChipTalk").Add_Click({ Set-Speech ($script:talkLines | Get-Random) })
 
 # 标题栏拖拽
 $window.FindName("MinBar").Add_MouseLeftButtonDown({ $window.DragMove() })
-$window.FindName("WhaleTitleBar").Add_MouseLeftButtonDown({ $window.DragMove() })
 
 # ------------------------------------------------------------ DSH 会话活跃度联动 ----
 # sessions 目录最近 15s 内有写入 → 主人在忙: 桌宠切 think/review 动画
@@ -1430,38 +1382,6 @@ $script:idleTimer.Interval = [TimeSpan]::FromSeconds(4)
 $script:idleTimer.Add_Tick({ Say-Idle })
 $script:idleTimer.Start()
 
-# 气泡装饰
-$rand = $script:rand
-$bubbles = @()
-for ($i = 0; $i -lt 14; $i++) {
-    $e = [System.Windows.Shapes.Ellipse]::new()
-    $size = 8 + $rand.Next(34)
-    $e.Width = $size; $e.Height = $size
-    $alpha = [byte](20 + $rand.Next(50))
-    $e.Fill = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.Color]::FromArgb($alpha, 255, 255, 255))
-    $x = $rand.Next(0, 960); $y = 300 + $rand.Next(0, 320)
-    $spd = 0.15 + ($rand.NextDouble() * 0.35)
-    [System.Windows.Controls.Canvas]::SetLeft($e, $x)
-    [System.Windows.Controls.Canvas]::SetTop($e, $y)
-    $bubbleCanvas.Children.Add($e) | Out-Null
-    $bubbles += [PSCustomObject]@{ E = $e; X = $x; Y = $y; Speed = $spd; Drift = (($rand.NextDouble() - 0.5) * 0.4) }
-}
-$script:bubbleTimer = [System.Windows.Threading.DispatcherTimer]::new()
-$script:bubbleTimer.Interval = [TimeSpan]::FromMilliseconds(80)
-$script:bubbleTimer.Add_Tick({
-    foreach ($b in $bubbles) {
-        $b.Y -= $b.Speed
-        $b.X += $b.Drift
-        if ($b.Y -lt -30) {
-            $b.Y = 660
-            $b.X = $rand.Next(0, 960)
-        }
-        [System.Windows.Controls.Canvas]::SetLeft($b.E, $b.X)
-        [System.Windows.Controls.Canvas]::SetTop($b.E, $b.Y)
-    }
-})
-$script:bubbleTimer.Start()
-
 # ------------------------------------------------------------ 启动 ----
 Set-PetAnim "idle"
 [System.Windows.Controls.Canvas]::SetLeft($petHost, $script:pet.x)
@@ -1471,11 +1391,9 @@ Update-StatusAll
 Update-OpenPanel
 Update-RestartPanel
 
-if ($Theme -eq "whale" -or $AutoTest) {
-    $winMin.Visibility = [System.Windows.Visibility]::Collapsed
-    $winWhale.Visibility = [System.Windows.Visibility]::Visible
-    Set-Speech "你好呀，我是 DSH 的小鲸鱼助手~ 点我一下，看看我能帮你做什么？" $true 8000
-}
+# 桌宠默认显示(独立透明置顶窗口), 可用主界面顶栏开关隐藏
+$petWin.Show()
+Set-Speech "你好呀，我是 DSH 的小鲸鱼助手~ 点我一下，看看我能帮你做什么？" $true 8000
 
 # 自动测试: 1.5秒模拟点击鲸鱼, 2.5秒验证"抛错不死"(L6防火墙), 6秒后自动关闭
 if ($AutoTest) {
@@ -1515,10 +1433,10 @@ if ($Diag) {
     $t.Add_Tick({
         $t.Stop()
         $hero = $window.FindName("HeroWhale")
-        $pet = $window.FindName("PetImage")
+        $pet = $petImage
         Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG hero: src=" + ($null -ne $hero.Source) + " w=" + $hero.ActualWidth + " h=" + $hero.ActualHeight + " vis=" + $hero.Visibility)
         Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG pet:  src=" + ($null -ne $pet.Source) + " w=" + $pet.ActualWidth + " h=" + $pet.ActualHeight)
-        Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG pet2:  anim=" + $script:pet.anim + " aIdx=" + $script:pet.aIdx + " mode=" + $script:pet.mode + " busy=" + $script:pet.busy + " size=" + $script:petSize + " hasAtlas=" + $script:petHasAtlas)
+        Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG pet2:  anim=" + $script:pet.anim + " aIdx=" + $script:pet.aIdx + " mode=" + $script:pet.mode + " busy=" + $script:pet.busy + " size=" + $script:petSize + " hasAtlas=" + $script:petHasAtlas + " petWinVis=" + $petWin.IsVisible)
         Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG emoji: vis=" + $petEmoji.Visibility + " text=" + $petEmoji.Text + " talkCd=" + $script:pet.talkCd)
         Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG window: actualW=" + $window.ActualWidth + " actualH=" + $window.ActualHeight)
         $window.Close()
@@ -1527,3 +1445,4 @@ if ($Diag) {
 }
 
 $window.ShowDialog() | Out-Null
+$petWin.Close()
