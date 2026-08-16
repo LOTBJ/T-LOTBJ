@@ -693,10 +693,13 @@ $script:WallpaperStatic = "C:\Users\tang\AppData\Local\npm-cache\_npx\1e7f6d9597
 
 function Set-Wallpaper([string]$srcPath) {
     try {
+        # 弹裁剪窗(头像/手机壁纸式交互): 拖拽选保留区域 + 滑杆缩放; 大图可选范围, 小图自动放大铺满
+        $rect = Show-WallpaperCropDialog $srcPath
+        if ($null -eq $rect) { Show-WallpaperHint "已取消, 壁纸未更改。" ; return $false }
         New-Item -ItemType Directory -Force -Path $script:WallpaperStatic | Out-Null
-        Copy-Item -LiteralPath $srcPath -Destination (Join-Path $script:WallpaperStatic "current.png") -Force
+        Render-WallpaperCrop -src $srcPath -rect $rect -out (Join-Path $script:WallpaperStatic "current.png")
         Update-WallpaperHtml $true
-        Show-WallpaperHint "✓ 壁纸已设为背景, 玻璃主题已开启。刷新 DSH 网页(F5)即可看到; 玻璃开关/背景源/模糊度随时在 DSH 设置-玻璃主题 里自己调。"
+        Show-WallpaperHint "✓ 壁纸已裁剪并设为背景, 玻璃主题已开启。刷新 DSH 网页(F5)即可看到; 玻璃开关/背景源/模糊度随时在 DSH 设置-玻璃主题 里自己调。"
         return $true
     } catch {
         Show-WallpaperHint "设置失败: $($_.Exception.Message)"
@@ -771,6 +774,283 @@ function Show-WallpaperHint([string]$text) {
     }
     $script:wallpaperHintTimer.Stop()
     $script:wallpaperHintTimer.Start()
+}
+
+# ------------------------------------------------------------ 壁纸裁剪窗(头像/手机壁纸式交互) ----
+# 视口比例 = 主屏比例(16:10); 初始 = 居中铺满(与旧行为一致);
+# 拖拽选保留区域, 滑杆/滚轮缩放(100%..400%), 大图可选范围、小图自动放大铺满
+# 裁剪数学: 预览视口 480x300 逻辑像素, 显示尺寸 = 原图像素 x s, s>=sMin(=cover 缩放)
+function Get-CropSourceRect([double]$imgW, [double]$imgH, [double]$sMin, [double]$zoom, [double]$offX, [double]$offY, [double]$vw, [double]$vh) {
+    $s = $sMin * $zoom
+    $srcX = (-$offX) / $s
+    $srcY = (-$offY) / $s
+    $srcW = $vw / $s
+    $srcH = $vh / $s
+    # 浮点边界钳制在 [0, img - src] 内
+    $srcX = [Math]::Max(0.0, [Math]::Min($srcX, $imgW - $srcW))
+    $srcY = [Math]::Max(0.0, [Math]::Min($srcY, $imgH - $srcH))
+    return [System.Windows.Rect]::new($srcX, $srcY, $srcW, $srcH)
+}
+
+# 按当前缩放/偏移刷新裁剪窗显示
+function Update-CropView {
+    $st = $script:CropState
+    $s = $st.sMin * $st.zoom
+    $dw = $st.imgW * $s
+    $dh = $st.imgH * $s
+    $maxX = [Math]::Min(0.0, $st.vw - $dw)
+    $maxY = [Math]::Min(0.0, $st.vh - $dh)
+    $st.offX = [Math]::Max($maxX, [Math]::Min(0.0, $st.offX))
+    $st.offY = [Math]::Max($maxY, [Math]::Min(0.0, $st.offY))
+    $img = $st.controls['img']
+    $img.Width = $dw
+    $img.Height = $dh
+    [System.Windows.Controls.Canvas]::SetLeft($img, $st.offX)
+    [System.Windows.Controls.Canvas]::SetTop($img, $st.offY)
+    $st.controls['slider'].Value = $st.zoom
+    $st.controls['info'].Text = "原图 $($st.imgW)x$($st.imgH) → 输出 $($st.outW)x$($st.outH) · 缩放 $([int]($st.zoom * 100))%  ·  拖拽选区域, 滑杆/滚轮缩放"
+}
+
+function Show-WallpaperCropDialog([string]$srcPath) {
+    try {
+        $fs = [IO.File]::OpenRead($srcPath)
+        $bi = [System.Windows.Media.Imaging.BitmapImage]::new()
+        $bi.BeginInit()
+        $bi.StreamSource = $fs
+        $bi.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+        $bi.EndInit()
+        $fs.Dispose()
+        $bi.Freeze()
+    } catch {
+        Show-WallpaperHint "无法读取该图片: $($_.Exception.Message)"
+        return $null
+    }
+    Add-Type -AssemblyName System.Windows.Forms
+    $scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $ratio = [double]$scr.Width / [double]$scr.Height
+    $vw = 480
+    $vh = [int][Math]::Round($vw / $ratio)
+    $imgW = [double]$bi.PixelWidth
+    $imgH = [double]$bi.PixelHeight
+    $sMin = [Math]::Max($vw / $imgW, $vh / $imgH)
+
+    # 状态放 script 作用域(事件处理器闭包读不到函数局部变量, 老坑)
+    $script:CropState = @{
+        imgW = $imgW; imgH = $imgH; sMin = $sMin; vw = $vw; vh = $vh
+        outW = $scr.Width; outH = $scr.Height
+        zoom = 1.0
+        offX = ($vw - $imgW * $sMin) / 2
+        offY = ($vh - $imgH * $sMin) / 2
+        drag = $null
+        controls = @{}
+    }
+    $st = $script:CropState
+
+    $dlg = [System.Windows.Window]::new()
+    $dlg.Owner = $window
+    $dlg.Title = "选择壁纸区域"
+    $dlg.Width = 600
+    $dlg.Height = 540
+    $dlg.WindowStartupLocation = [System.Windows.WindowStartupLocation]::CenterOwner
+    $dlg.ResizeMode = [System.Windows.ResizeMode]::NoResize
+    $dlg.WindowStyle = [System.Windows.WindowStyle]::ToolWindow
+    $dlg.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#14161B"))
+
+    $root = [System.Windows.Controls.Grid]::new()
+    $root.Margin = [System.Windows.Thickness]::new(20, 16, 20, 16)
+    $rowTitle = [System.Windows.Controls.RowDefinition]::new(); $rowTitle.Height = [System.Windows.GridLength]::Auto
+    $rowView = [System.Windows.Controls.RowDefinition]::new()
+    $rowInfo = [System.Windows.Controls.RowDefinition]::new(); $rowInfo.Height = [System.Windows.GridLength]::Auto
+    $rowZoom = [System.Windows.Controls.RowDefinition]::new(); $rowZoom.Height = [System.Windows.GridLength]::Auto
+    $rowBtns = [System.Windows.Controls.RowDefinition]::new(); $rowBtns.Height = [System.Windows.GridLength]::Auto
+    $root.RowDefinitions.Add($rowTitle) | Out-Null
+    $root.RowDefinitions.Add($rowView) | Out-Null
+    $root.RowDefinitions.Add($rowInfo) | Out-Null
+    $root.RowDefinitions.Add($rowZoom) | Out-Null
+    $root.RowDefinitions.Add($rowBtns) | Out-Null
+    $dlg.Content = $root
+
+    # 标题
+    $title = [System.Windows.Controls.TextBlock]::new()
+    $title.Text = "选择壁纸区域 — 视口即屏幕(16:10), 拖拽移动, 滑杆/滚轮缩放"
+    $title.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#E8ECF4"))
+    $title.FontSize = 13
+    $title.Margin = [System.Windows.Thickness]::new(0, 0, 0, 12)
+    [System.Windows.Controls.Grid]::SetRow($title, 0)
+    $root.Children.Add($title) | Out-Null
+
+    # 裁剪视口
+    $border = [System.Windows.Controls.Border]::new()
+    $border.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#3E4654"))
+    $border.BorderThickness = [System.Windows.Thickness]::new(1)
+    $border.CornerRadius = [System.Windows.CornerRadius]::new(10)
+    $border.Margin = [System.Windows.Thickness]::new(0, 0, 0, 10)
+    $cv = [System.Windows.Controls.Canvas]::new()
+    $cv.Width = $vw
+    $cv.Height = $vh
+    $cv.ClipToBounds = $true
+    $cv.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#000000"))
+    $border.Child = $cv
+    [System.Windows.Controls.Grid]::SetRow($border, 1)
+    $root.Children.Add($border) | Out-Null
+
+    $img = [System.Windows.Controls.Image]::new()
+    $img.Source = $bi
+    $img.Stretch = [System.Windows.Media.Stretch]::Fill
+    [System.Windows.Media.RenderOptions]::SetBitmapScalingMode($img, [System.Windows.Media.BitmapScalingMode]::HighQuality)
+    $cv.Children.Add($img) | Out-Null
+
+    # 信息行 + 缩放行 + 按钮行
+    $info = [System.Windows.Controls.TextBlock]::new()
+    $info.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#8A919E"))
+    $info.FontSize = 11
+    $info.Margin = [System.Windows.Thickness]::new(0, 0, 0, 6)
+    [System.Windows.Controls.Grid]::SetRow($info, 2)
+    $root.Children.Add($info) | Out-Null
+
+    $zoomRow = [System.Windows.Controls.Grid]::new()
+    $zoomRow.Margin = [System.Windows.Thickness]::new(0, 0, 0, 14)
+    $zcol1 = [System.Windows.Controls.ColumnDefinition]::new(); $zcol1.Width = [System.Windows.GridLength]::new(44)
+    $zcol2 = [System.Windows.Controls.ColumnDefinition]::new()
+    $zoomRow.ColumnDefinitions.Add($zcol1) | Out-Null
+    $zoomRow.ColumnDefinitions.Add($zcol2) | Out-Null
+    $zoomLabel = [System.Windows.Controls.TextBlock]::new()
+    $zoomLabel.Text = "缩放"
+    $zoomLabel.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#8A919E"))
+    $zoomLabel.FontSize = 11
+    $zoomLabel.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $slider = [System.Windows.Controls.Slider]::new()
+    $slider.Minimum = 1
+    $slider.Maximum = 4
+    $slider.Value = 1
+    $slider.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    [System.Windows.Controls.Grid]::SetColumn($zoomLabel, 0)
+    [System.Windows.Controls.Grid]::SetColumn($slider, 1)
+    $zoomRow.Children.Add($zoomLabel) | Out-Null
+    $zoomRow.Children.Add($slider) | Out-Null
+    [System.Windows.Controls.Grid]::SetRow($zoomRow, 3)
+    $root.Children.Add($zoomRow) | Out-Null
+
+    $btnRow = [System.Windows.Controls.StackPanel]::new()
+    $btnRow.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+    $btnRow.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Right
+    $btnCancel = [System.Windows.Controls.Button]::new()
+    $btnCancel.Content = "取消"
+    $btnCancel.Width = 88
+    $btnCancel.Margin = [System.Windows.Thickness]::new(0, 0, 10, 0)
+    $btnCancel.Style = $window.FindResource("GhostBtn")
+    $btnOk = [System.Windows.Controls.Button]::new()
+    $btnOk.Content = "确认应用"
+    $btnOk.Width = 100
+    $btnOk.Style = $window.FindResource("PrimaryBtn")
+    $btnRow.Children.Add($btnCancel) | Out-Null
+    $btnRow.Children.Add($btnOk) | Out-Null
+    [System.Windows.Controls.Grid]::SetRow($btnRow, 4)
+    $root.Children.Add($btnRow) | Out-Null
+
+    $st.controls['img'] = $img
+    $st.controls['slider'] = $slider
+    $st.controls['info'] = $info
+    Update-CropView
+
+    # 拖拽: MouseDown 记偏移 + MouseMove 手动移(不用 DragMove, 会卡死消息循环, 坑#22)
+    $cv.Add_MouseDown({ param($s, $e)
+        $st2 = $script:CropState
+        $pt = $e.GetPosition($s)
+        $st2.drag = @{ x = $pt.X; y = $pt.Y; offX = $st2.offX; offY = $st2.offY }
+        $s.CaptureMouse() | Out-Null
+    })
+    $cv.Add_MouseMove({ param($s, $e)
+        $st2 = $script:CropState
+        if ($null -ne $st2.drag) {
+            $pt = $e.GetPosition($s)
+            $st2.offX = $st2.drag.offX + ($pt.X - $st2.drag.x)
+            $st2.offY = $st2.drag.offY + ($pt.Y - $st2.drag.y)
+            Update-CropView
+        }
+    })
+    $cv.Add_MouseUp({ param($s, $e)
+        $script:CropState.drag = $null
+        $s.ReleaseMouseCapture()
+    })
+    $cv.Add_MouseLeave({ param($s, $e)
+        if ($null -ne $script:CropState.drag) { $script:CropState.drag = $null }
+    })
+    $slider.Add_ValueChanged({ param($s, $e)
+        $st2 = $script:CropState
+        if ([Math]::Abs($st2.zoom - $s.Value) -gt 0.001) {
+            $st2.zoom = [double]$s.Value
+            Update-CropView
+        }
+    })
+    $cv.Add_MouseWheel({ param($s, $e)
+        $st2 = $script:CropState
+        $factor = if ($e.Delta -gt 0) { 1.12 } else { 0.89 }
+        $newZoom = [Math]::Min(4.0, [Math]::Max(1.0, $st2.zoom * $factor))
+        if ([Math]::Abs($newZoom - $st2.zoom) -gt 0.001) {
+            # 以视口中心为锚缩放(标准头像交互)
+            $cx = $st2.vw / 2
+            $cy = $st2.vh / 2
+            $ratio2 = $newZoom / $st2.zoom
+            $st2.offX = $cx - ($cx - $st2.offX) * $ratio2
+            $st2.offY = $cy - ($cy - $st2.offY) * $ratio2
+            $st2.zoom = $newZoom
+            Update-CropView
+        }
+    })
+
+    $btnCancel.Add_Click({ param($s, $e) $dlg.DialogResult = $false }.GetNewClosure())
+    $btnOk.Add_Click({ param($s, $e)
+        $st2 = $script:CropState
+        $st2.result = Get-CropSourceRect $st2.imgW $st2.imgH $st2.sMin $st2.zoom $st2.offX $st2.offY $st2.vw $st2.vh
+        $dlg.DialogResult = $true
+    }.GetNewClosure())
+
+    $res = $dlg.ShowDialog()
+    $out = $null
+    if ($res) { $out = $script:CropState.result }
+    $script:CropState = $null
+    return $out
+}
+
+# 把原图按裁剪矩形渲染成屏幕分辨率 PNG 写入 outPath
+# 裁剪用 CroppedBitmap(Int32Rect, 像素坐标): DrawImage 的源矩形重载有 DPI 陷阱, 非96DPI图会画空(坑#31)
+function Render-WallpaperCrop([string]$src, [System.Windows.Rect]$rect, [string]$outPath) {
+    $fs = [IO.File]::OpenRead($src)
+    $bi = [System.Windows.Media.Imaging.BitmapImage]::new()
+    $bi.BeginInit()
+    $bi.StreamSource = $fs
+    $bi.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+    $bi.EndInit()
+    $fs.Dispose()
+    $bi.Freeze()
+    $iw = $bi.PixelWidth
+    $ih = $bi.PixelHeight
+    $x = [int][Math]::Floor($rect.X)
+    $y = [int][Math]::Floor($rect.Y)
+    $w = [int][Math]::Ceiling($rect.Width)
+    $h = [int][Math]::Ceiling($rect.Height)
+    $x = [Math]::Max(0, [Math]::Min($x, $iw - 1))
+    $y = [Math]::Max(0, [Math]::Min($y, $ih - 1))
+    $w = [Math]::Min($w, $iw - $x)
+    $h = [Math]::Min($h, $ih - $y)
+    $cb = [System.Windows.Media.Imaging.CroppedBitmap]::new($bi, [System.Windows.Int32Rect]::new($x, $y, $w, $h))
+    $cb.Freeze()
+    Add-Type -AssemblyName System.Windows.Forms
+    $scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $tw = [int]$scr.Width
+    $th = [int]$scr.Height
+    $dv = [System.Windows.Media.DrawingVisual]::new()
+    $dc = $dv.RenderOpen()
+    $dc.DrawImage($cb, [System.Windows.Rect]::new(0, 0, $tw, $th))
+    $dc.Close()
+    $rtb = [System.Windows.Media.Imaging.RenderTargetBitmap]::new($tw, $th, 96, 96, [System.Windows.Media.PixelFormats]::Pbgra32)
+    $rtb.Render($dv)
+    $enc = [System.Windows.Media.Imaging.PngBitmapEncoder]::new()
+    $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($rtb))
+    $ofs = [IO.File]::Open($outPath, [IO.FileMode]::Create)
+    $enc.Save($ofs)
+    $ofs.Dispose()
 }
 
 function Update-WallpaperPanel {
@@ -911,7 +1191,7 @@ function Update-WallpaperPanel {
         $card.Child = $sp
         $wallpaperGrid.Children.Add($card) | Out-Null
     }
-    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸自动开玻璃以透出(可在 DSH 设置-玻璃主题 关) · 首卡「原版 UI」一键回出厂界面 · 刷新网页生效"
+    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸弹裁剪窗(拖拽选区域+滑杆缩放, 小图自动放大铺满) · 首卡「原版 UI」一键回出厂界面 · 刷新网页生效"
 }
 
 function Add-WallpaperFile {
