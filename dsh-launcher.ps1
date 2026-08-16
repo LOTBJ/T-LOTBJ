@@ -443,7 +443,7 @@ $xaml = @'
 
             <!-- 环境面板 -->
             <StackPanel x:Name="PanelEnv" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
-              <Border CornerRadius="20" Background="#8CFFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="560">
+              <Border CornerRadius="20" Background="#F2FFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="560">
                 <StackPanel>
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="环 境 信 息" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
@@ -457,7 +457,7 @@ $xaml = @'
 
             <!-- 技能面板 -->
             <StackPanel x:Name="PanelSkills" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
-              <Border CornerRadius="20" Background="#8CFFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="600">
+              <Border CornerRadius="20" Background="#F2FFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="600">
                 <StackPanel>
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="技 能 库" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
@@ -473,13 +473,13 @@ $xaml = @'
 
             <!-- 环境装配面板 (一键下载安装 DSH 运行环境, 借鉴大肥鱼"别人一键装配"思路) -->
             <StackPanel x:Name="PanelSetup" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
-              <Border CornerRadius="20" Background="#8CFFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="580">
+              <Border CornerRadius="20" Background="#F2FFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="580">
                 <StackPanel>
                   <TextBlock Text="环 境 装 配" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
                   <TextBlock Text="新机器一键装配 DSH 运行环境：检测 node/npm → 自动下载安装 dsh → 生成配置，开箱即用。" Foreground="#8A919E" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
                   <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-                    <TextBlock x:Name="SetupState" Text="检测中…" Foreground="#1E232C" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                    <Button x:Name="BtnSetupGo" Style="{StaticResource PrimaryBtn}" Content="🔧 一键装配" Height="44" Background="#4D6BFE" Padding="26,0" HorizontalAlignment="Right"/>
+                    <TextBlock x:Name="SetupState" Text="检测中…" Foreground="#1E232C" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap" Width="400"/>
+                    <Button x:Name="BtnSetupGo" Style="{StaticResource PrimaryBtn}" Content="🔧 一键装配" Height="44" Background="#4D6BFE" Padding="26,0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                   </StackPanel>
                   <Border CornerRadius="12" Background="#26FFFFFF" BorderBrush="#55FFFFFF" BorderThickness="1" Padding="12,10" Margin="0,14,0,0">
                     <TextBlock x:Name="SetupLogBox" Text="" Foreground="#5B6472" FontSize="11.5" FontFamily="Consolas" TextWrapping="Wrap" MaxHeight="160"/>
@@ -806,11 +806,14 @@ $petImage.Stretch = [System.Windows.Media.Stretch]::Fill
 $script:heroTT = [System.Windows.Media.TranslateTransform]::new(0, 0)
 $window.FindName("HeroWhale").RenderTransform = $script:heroTT
 
+$script:lastFrameKey = ""
 function Set-PetFrame([int]$row, [int]$col, [string]$custom = "") {
     if (-not $script:petHasAtlas) { return }
-    $src = $null
-    if ($custom) { $src = $script:frames["$custom,$col"] }
-    else { $src = $script:frames["$row,$col"] }
+    # 帧缓存: 同一帧不重复设置 Image.Source(注视/待机每 tick 重复设同一帧是主要浪费)
+    $key = if ($custom) { "$custom,$col" } else { "$row,$col" }
+    if ($key -eq $script:lastFrameKey) { return }
+    $script:lastFrameKey = $key
+    $src = $script:frames[$key]
     if ($src) { $petImage.Source = $src }
 }
 
@@ -1636,9 +1639,8 @@ $petHost.Add_MouseLeftButtonUp({
 
 # ------------------------------------------------------------ 事件绑定 ----
 $window.FindName("BtnCloseMin").Add_Click({
-    # 关闭 = 隐藏到托盘(桌面端常驻, 桌宠继续陪伴); 托盘菜单里才是真退出
-    $window.Hide()
-    try { $script:tray.ShowBalloonTip(2000, "DeepSeek Harness", "已隐藏到托盘，桌宠继续陪伴~ 托盘菜单可退出。", [System.Windows.Forms.ToolTipIcon]::Info) } catch { }
+    # 直接关闭: 整个退出(含桌宠), 不驻留后台
+    $window.Close()
 })
 $window.FindName("BtnMinMin").Add_Click({ $window.WindowState = [System.Windows.WindowState]::Minimized })
 $window.FindName("BtnPetToggle").Add_Click({
@@ -1798,7 +1800,7 @@ function Update-PetBusy {
 
     # 系统监控(借鉴 大肥鱼桌宠): 每 12 秒检查一次, 超阈值冒泡提醒
     $script:sysTick++
-    if ($script:sysTick % 4 -eq 0) {
+    if ($script:sysTick % 10 -eq 0) {
         try {
             $mem = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
             if ($mem -and $mem.TotalVisibleMemorySize -gt 0) {
