@@ -17,3 +17,7 @@ tmp-*.png
 mcp/
 工具脚本/
 旧文件备份/
+
+# python runtime & pet local config (may contain API key)
+__pycache__/
+config.json
