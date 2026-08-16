@@ -94,8 +94,8 @@ function Start-DshServer {
     if (-not (Test-Path -LiteralPath $NodeExe)) { $script:NodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source }
     if (-not (Test-Path -LiteralPath $DshBin))  { $script:DshBin  = (Get-Command dsh -ErrorAction SilentlyContinue).Source }
     if (-not (Test-Path -LiteralPath $DshBin))  { return $false }
-    # 日志文件可能被刚杀掉的旧实例短暂锁定 → 最多重试 3 次
-    for ($i = 0; $i -lt 3; $i++) {
+    # 日志文件可能被刚杀掉的旧实例短暂锁定 → 最多重试 5 次
+    for ($i = 0; $i -lt 5; $i++) {
         try {
             $p = Start-Process -FilePath $NodeExe `
                                -ArgumentList @($DshBin, "web") `
@@ -107,7 +107,7 @@ function Start-DshServer {
             return ($null -ne $p)
         } catch {
             Add-Content -Path "$env:TEMP\dsh-launcher-errors.log" -Value ("START-ERR: " + $_.Exception.Message)
-            Start-Sleep -Milliseconds 500
+            Start-Sleep -Milliseconds 800
         }
     }
     return $false
@@ -116,8 +116,10 @@ function Start-DshServer {
 function Stop-DshServer {
     $pid2 = Get-ServerPid
     if ($pid2) {
+        # 杀整棵进程树(node 常有子进程残留: 锁日志文件+占端口, 导致重启失效)
+        try { Start-Process taskkill -ArgumentList '/PID', $pid2, '/T', '/F' -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue } catch { }
         Stop-Process -Id $pid2 -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Milliseconds 800
+        Start-Sleep -Milliseconds 1200
     }
 }
 
@@ -1299,8 +1301,9 @@ function Start-DshUrl {
 }
 
 function Start-OpenFlow {
-    if ($script:busy) { return }
+    if ($script:busy) { $openState.Text = "正在忙，请稍候…"; return }
     $script:busy = $true
+    $script:busySince = [DateTime]::Now
     $openState.Text = "正在打开…"
     $openDetail.Text = "如果服务未运行，将自动启动（约 5-15 秒）"
     if (Test-ServerUp) {
@@ -1339,8 +1342,12 @@ function Start-OpenFlow {
 }
 
 function Start-RestartFlow([bool]$openBrowser) {
-    if ($script:busy) { return }
+    if ($script:busy) {
+        $openState.Text = "正在忙，请稍候…"
+        return
+    }
     $script:busy = $true
+    $script:busySince = [DateTime]::Now
     $openState.Text = "正在重启…"
     Set-PetTalk "收到，正在重启，等我一下下~"
     Stop-DshServer
@@ -1811,6 +1818,11 @@ $script:statusTimer.Interval = [TimeSpan]::FromSeconds(3)
 $script:statusTimer.Add_Tick({
     Update-StatusAll
     Update-PetBusy
+    # busy 看门狗: 任何流程卡死超过 60 秒强制复位, 防止重启按钮永久失效
+    if ($script:busy -and $script:busySince -and ([DateTime]::Now - $script:busySince).TotalSeconds -gt 60) {
+        $script:busy = $false
+        $openState.Text = "上次操作超时，已自动恢复"
+    }
 })
 $script:statusTimer.Start()
 
