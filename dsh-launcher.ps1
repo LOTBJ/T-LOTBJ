@@ -691,15 +691,75 @@ function Update-SetupPanel {
 # ------------------------------------------------------------ 壁纸中心 ----
 $script:WallpaperStatic = "C:\Users\tang\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\@deepseek-ai\dsh-web-frontend\dist\wallpaper"
 
+# 原生像素尺寸: GDI+ 只读文件头, 快(WebP 等不支持时返回 $null)
+function Get-ImageNativeSize([string]$path) {
+    try {
+        Add-Type -AssemblyName System.Drawing
+        $img = [System.Drawing.Image]::FromFile($path)
+        $w = $img.Width
+        $h = $img.Height
+        $img.Dispose()
+        return @{ w = [double]$w; h = [double]$h }
+    } catch {
+        return $null
+    }
+}
+
+# 设壁纸前先比大小/比例, 决定适配方式(用户需求: 比较后再决定剪切还是缩小):
+#   copy  = 尺寸+比例都合适 → 直接复制, 零处理
+#   scale = 比例一致但尺寸不匹配 → 自动放大(小图)或缩小(大图), 不弹窗
+#   crop  = 比例不一致 → 弹裁剪窗让用户选保留区域
+# 注意: 别用 DecodePixelWidth 取尺寸 — 它会把小图放大到限宽值, 比大小全错(坑#34)
+function Get-WallpaperPlan([string]$srcPath) {
+    $native = Get-ImageNativeSize $srcPath
+    if ($null -eq $native) {
+        # GDI+ 读不了(如 WebP): 退化为不弹窗的整图缩放
+        return @{ mode = 'scale'; up = $false }
+    }
+    $iw = $native.w
+    $ih = $native.h
+    Add-Type -AssemblyName System.Windows.Forms
+    $scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $tw = [double]$scr.Width
+    $th = [double]$scr.Height
+    $imgRatio = $iw / $ih
+    $targetRatio = $tw / $th
+    $ratioDiff = [Math]::Abs($imgRatio - $targetRatio) / $targetRatio
+    $isPng = ([System.IO.Path]::GetExtension($srcPath)).ToLower() -eq '.png'
+    $fitSize = ($iw -le $tw * 1.05) -and ($ih -le $th * 1.05) -and ($iw -ge $tw * 0.85) -and ($ih -ge $th * 0.85)
+    if ($ratioDiff -lt 0.03) {
+        if ($fitSize -and $isPng) { return @{ mode = 'copy' } }
+        return @{ mode = 'scale'; up = (($iw -lt $tw) -or ($ih -lt $th)) }
+    }
+    return @{ mode = 'crop' }
+}
+
 function Set-Wallpaper([string]$srcPath) {
     try {
-        # 弹裁剪窗(头像/手机壁纸式交互): 拖拽选保留区域 + 滑杆缩放; 大图可选范围, 小图自动放大铺满
-        $rect = Show-WallpaperCropDialog $srcPath
-        if ($null -eq $rect) { Show-WallpaperHint "已取消, 壁纸未更改。" ; return $false }
+        $plan = Get-WallpaperPlan $srcPath
         New-Item -ItemType Directory -Force -Path $script:WallpaperStatic | Out-Null
-        Render-WallpaperCrop -src $srcPath -rect $rect -out (Join-Path $script:WallpaperStatic "current.png")
+        $out = Join-Path $script:WallpaperStatic "current.png"
+        if ($plan.mode -eq 'copy') {
+            Copy-Item -LiteralPath $srcPath -Destination $out -Force
+        } elseif ($plan.mode -eq 'scale') {
+            # 比例一致: 不弹窗, 整图缩放(小图放大铺满, 大图缩小)
+            $full = [System.Windows.Rect]::new(0, 0, 1, 1)
+            Render-WallpaperCrop -src $srcPath -rect $full -out $out -fullImage
+        } else {
+            # 比例不一致: 弹裁剪窗(拖拽选区域 + 滑杆/滚轮缩放)
+            $rect = Show-WallpaperCropDialog $srcPath
+            if ($null -eq $rect) { Show-WallpaperHint "已取消, 壁纸未更改。" ; return $false }
+            Render-WallpaperCrop -src $srcPath -rect $rect -out $out
+        }
         Update-WallpaperHtml $true
-        Show-WallpaperHint "✓ 壁纸已裁剪并设为背景, 玻璃主题已开启。刷新 DSH 网页(F5)即可看到; 玻璃开关/背景源/模糊度随时在 DSH 设置-玻璃主题 里自己调。"
+        if ($plan.mode -eq 'copy') {
+            Show-WallpaperHint "✓ 尺寸比例正好匹配屏幕, 已直接应用。刷新 DSH 网页(F5)即可看到。"
+        } elseif ($plan.mode -eq 'scale') {
+            if ($plan.up) { Show-WallpaperHint "✓ 原图偏小, 已放大铺满屏幕后应用。刷新 DSH 网页(F5)即可看到。" }
+            else { Show-WallpaperHint "✓ 原图偏大, 已按屏幕尺寸缩小后应用。刷新 DSH 网页(F5)即可看到。" }
+        } else {
+            Show-WallpaperHint "✓ 壁纸已按所选区域裁剪并设为背景。刷新 DSH 网页(F5)即可看到。"
+        }
         return $true
     } catch {
         Show-WallpaperHint "设置失败: $($_.Exception.Message)"
@@ -808,15 +868,18 @@ function Update-CropView {
     [System.Windows.Controls.Canvas]::SetLeft($img, $st.offX)
     [System.Windows.Controls.Canvas]::SetTop($img, $st.offY)
     $st.controls['slider'].Value = $st.zoom
-    $st.controls['info'].Text = "原图 $($st.imgW)x$($st.imgH) → 输出 $($st.outW)x$($st.outH) · 缩放 $([int]($st.zoom * 100))%  ·  拖拽选区域, 滑杆/滚轮缩放"
+    $st.controls['info'].Text = "原图 $($st.nativeW)x$($st.nativeH) → 输出 $($st.outW)x$($st.outH) · 缩放 $([int]($st.zoom * 100))%  ·  拖拽选区域, 滑杆/滚轮缩放"
 }
 
 function Show-WallpaperCropDialog([string]$srcPath) {
     try {
+        $native = Get-ImageNativeSize $srcPath
         $fs = [IO.File]::OpenRead($srcPath)
         $bi = [System.Windows.Media.Imaging.BitmapImage]::new()
         $bi.BeginInit()
         $bi.StreamSource = $fs
+        # 只在原图比限宽大时才解码缩小(小图不放大, 坑#34); 渲染端同规则, 像素坐标一致
+        if ($null -ne $native -and $native.w -gt 2400) { $bi.DecodePixelWidth = 2400 }
         $bi.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
         $bi.EndInit()
         $fs.Dispose()
@@ -833,10 +896,12 @@ function Show-WallpaperCropDialog([string]$srcPath) {
     $imgW = [double]$bi.PixelWidth
     $imgH = [double]$bi.PixelHeight
     $sMin = [Math]::Max($vw / $imgW, $vh / $imgH)
+    if ($null -eq $native) { $native = @{ w = $imgW; h = $imgH } }
 
     # 状态放 script 作用域(事件处理器闭包读不到函数局部变量, 老坑)
     $script:CropState = @{
         imgW = $imgW; imgH = $imgH; sMin = $sMin; vw = $vw; vh = $vh
+        nativeW = $native.w; nativeH = $native.h
         outW = $scr.Width; outH = $scr.Height
         zoom = 1.0
         offX = ($vw - $imgW * $sMin) / 2
@@ -951,6 +1016,7 @@ function Show-WallpaperCropDialog([string]$srcPath) {
     $st.controls['img'] = $img
     $st.controls['slider'] = $slider
     $st.controls['info'] = $info
+    $st.controls['dlg'] = $dlg
     Update-CropView
 
     # 拖拽: MouseDown 记偏移 + MouseMove 手动移(不用 DragMove, 会卡死消息循环, 坑#22)
@@ -999,12 +1065,14 @@ function Show-WallpaperCropDialog([string]$srcPath) {
         }
     })
 
-    $btnCancel.Add_Click({ param($s, $e) $dlg.DialogResult = $false }.GetNewClosure())
+    # 按钮不能用 GetNewClosure: 闭包模块里 $script: 指向闭包自己的作用域, 读不到 CropState
+    # → 空引用异常被 WPF 静默吞掉, DialogResult 永远不置位, 窗口关不掉(= 点确认后卡死, 坑#33)
+    $btnCancel.Add_Click({ param($s, $e) $script:CropState.controls['dlg'].DialogResult = $false })
     $btnOk.Add_Click({ param($s, $e)
         $st2 = $script:CropState
         $st2.result = Get-CropSourceRect $st2.imgW $st2.imgH $st2.sMin $st2.zoom $st2.offX $st2.offY $st2.vw $st2.vh
-        $dlg.DialogResult = $true
-    }.GetNewClosure())
+        $st2.controls['dlg'].DialogResult = $true
+    })
 
     $res = $dlg.ShowDialog()
     $out = $null
@@ -1013,27 +1081,35 @@ function Show-WallpaperCropDialog([string]$srcPath) {
     return $out
 }
 
-# 把原图按裁剪矩形渲染成屏幕分辨率 PNG 写入 outPath
+# 把原图按裁剪矩形渲染成屏幕分辨率 PNG 写入 outPath(-fullImage = 整图缩放)
+# 解码限宽 2400: 超大图处理从分钟级压到 ~0.2s(坑#32); 预览与渲染同解码尺寸, 像素坐标一致
 # 裁剪用 CroppedBitmap(Int32Rect, 像素坐标): DrawImage 的源矩形重载有 DPI 陷阱, 非96DPI图会画空(坑#31)
-function Render-WallpaperCrop([string]$src, [System.Windows.Rect]$rect, [string]$outPath) {
+function Render-WallpaperCrop([string]$src, [System.Windows.Rect]$rect, [string]$outPath, [switch]$fullImage) {
     $fs = [IO.File]::OpenRead($src)
     $bi = [System.Windows.Media.Imaging.BitmapImage]::new()
     $bi.BeginInit()
     $bi.StreamSource = $fs
+    # 只在原图比限宽大时才解码缩小(与裁剪窗预览同规则, 像素坐标一致; 坑#34)
+    $native = Get-ImageNativeSize $src
+    if ($null -ne $native -and $native.w -gt 2400) { $bi.DecodePixelWidth = 2400 }
     $bi.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
     $bi.EndInit()
     $fs.Dispose()
     $bi.Freeze()
     $iw = $bi.PixelWidth
     $ih = $bi.PixelHeight
-    $x = [int][Math]::Floor($rect.X)
-    $y = [int][Math]::Floor($rect.Y)
-    $w = [int][Math]::Ceiling($rect.Width)
-    $h = [int][Math]::Ceiling($rect.Height)
-    $x = [Math]::Max(0, [Math]::Min($x, $iw - 1))
-    $y = [Math]::Max(0, [Math]::Min($y, $ih - 1))
-    $w = [Math]::Min($w, $iw - $x)
-    $h = [Math]::Min($h, $ih - $y)
+    if ($fullImage) {
+        $x = 0; $y = 0; $w = $iw; $h = $ih
+    } else {
+        $x = [int][Math]::Floor($rect.X)
+        $y = [int][Math]::Floor($rect.Y)
+        $w = [int][Math]::Ceiling($rect.Width)
+        $h = [int][Math]::Ceiling($rect.Height)
+        $x = [Math]::Max(0, [Math]::Min($x, $iw - 1))
+        $y = [Math]::Max(0, [Math]::Min($y, $ih - 1))
+        $w = [Math]::Min($w, $iw - $x)
+        $h = [Math]::Min($h, $ih - $y)
+    }
     $cb = [System.Windows.Media.Imaging.CroppedBitmap]::new($bi, [System.Windows.Int32Rect]::new($x, $y, $w, $h))
     $cb.Freeze()
     Add-Type -AssemblyName System.Windows.Forms
@@ -1191,7 +1267,7 @@ function Update-WallpaperPanel {
         $card.Child = $sp
         $wallpaperGrid.Children.Add($card) | Out-Null
     }
-    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸弹裁剪窗(拖拽选区域+滑杆缩放, 小图自动放大铺满) · 首卡「原版 UI」一键回出厂界面 · 刷新网页生效"
+    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸自动比尺寸: 匹配直接应用 / 同比例自动缩放 / 比例不同弹裁剪窗选区域 · 首卡「原版 UI」一键回出厂界面 · 刷新网页生效"
 }
 
 function Add-WallpaperFile {
