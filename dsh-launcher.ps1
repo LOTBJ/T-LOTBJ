@@ -695,10 +695,11 @@ function Set-Wallpaper([string]$srcPath) {
     try {
         New-Item -ItemType Directory -Force -Path $script:WallpaperStatic | Out-Null
         Copy-Item -LiteralPath $srcPath -Destination (Join-Path $script:WallpaperStatic "current.png") -Force
-        $wallpaperHint.Text = "✓ 壁纸已设为背景。刷新 DSH 网页(F5)即可看到; 玻璃材质请在 DSH 设置里自行开关。"
+        Update-WallpaperHtml $true
+        Show-WallpaperHint "✓ 壁纸已写入页面背景。注意: 默认UI是不透明白色, 会遮住壁纸——在 DSH 设置里开启玻璃材质后才能透出; 之后刷新网页(F5)生效。"
         return $true
     } catch {
-        $wallpaperHint.Text = "设置失败: $($_.Exception.Message)"
+        Show-WallpaperHint "设置失败: $($_.Exception.Message)"
         return $false
     }
 }
@@ -706,10 +707,59 @@ function Set-Wallpaper([string]$srcPath) {
 function Reset-Wallpaper {
     try {
         Remove-Item -LiteralPath (Join-Path $script:WallpaperStatic "current.png") -Force -ErrorAction SilentlyContinue
-        $wallpaperHint.Text = "✓ 已恢复默认(无壁纸)。刷新 DSH 网页(F5)生效。"
+        Update-WallpaperHtml $false
+        Show-WallpaperHint "✓ 已移除壁纸背景。刷新网页(F5)后恢复默认。"
     } catch {
-        $wallpaperHint.Text = "恢复失败: $($_.Exception.Message)"
+        Show-WallpaperHint "恢复失败: $($_.Exception.Message)"
     }
+}
+
+# 改写 dist/index.html 内联样式 <style id="dsh-wallpaper-css">:
+#   $apply=$true  注入 body 壁纸背景(刷新 ?t= 时间戳防缓存; 样式块缺失时自动补插)
+#   $apply=$false 清空为 background:none(不删样式块, 便于下次再设)
+# 走 HTML 而非 JS 插件: index.html 每次请求从磁盘下发, 不受 JS 包缓存影响(坑#26)
+function Update-WallpaperHtml([bool]$apply) {
+    $html = Join-Path (Split-Path $script:WallpaperStatic -Parent) "index.html"
+    if (-not (Test-Path -LiteralPath $html)) { return }
+    $text = [IO.File]::ReadAllText($html, [Text.UTF8Encoding]::new($false))
+    if ($apply) {
+        $ts = [DateTime]::Now.Ticks
+        if ($text.Contains('body{background:none !important;}')) {
+            # Reset 清空过: 恢复 url
+            $text = $text.Replace('body{background:none !important;}',
+                "body{background:url(/wallpaper/current.png?t=$ts) center/cover no-repeat fixed !important;}")
+        } elseif ($text.Contains('wallpaper/current.png?t=')) {
+            # 已有 url: 仅刷新时间戳(用 MatchEvaluator, 避开替换串里 $ 的坑)
+            $rx = [regex]'wallpaper/current\.png\?t=[^)]*'
+            $text = $rx.Replace($text, { param($m) "wallpaper/current.png?t=$ts" })
+        } else {
+            # DSH 更新覆盖过 index.html: 样式块丢失, 重新插入 </head> 前
+            $block = "    <style id=`"dsh-wallpaper-css`">`n" +
+                     "      /* 壁纸中心注入层(启动器配套): 直接覆盖 body 背景; 默认UI不透明白色会遮住, 开启玻璃材质后透出 */`n" +
+                     "      body{background:url(/wallpaper/current.png?t=$ts) center/cover no-repeat fixed !important;}`n" +
+                     "    </style>`n  </head>"
+            $text = $text.Replace('</head>', $block)
+        }
+    } else {
+        $text = $text -replace 'body\{background:url\([^)]*\) center/cover no-repeat fixed !important;\}',
+            'body{background:none !important;}'
+    }
+    [IO.File]::WriteAllText($html, $text, [Text.UTF8Encoding]::new($false))
+}
+
+# 壁纸提示(自动消失, ~8s): 解决"成功提示永久留在面板上"的观感问题
+function Show-WallpaperHint([string]$text) {
+    $wallpaperHint.Text = $text
+    if (-not $script:wallpaperHintTimer) {
+        $script:wallpaperHintTimer = [System.Windows.Threading.DispatcherTimer]::new()
+        $script:wallpaperHintTimer.Interval = [TimeSpan]::FromSeconds(8)
+        $script:wallpaperHintTimer.Add_Tick({
+            $script:wallpaperHintTimer.Stop()
+            $wallpaperHint.Text = ""
+        })
+    }
+    $script:wallpaperHintTimer.Stop()
+    $script:wallpaperHintTimer.Start()
 }
 
 function Update-WallpaperPanel {
@@ -791,7 +841,7 @@ function Update-WallpaperPanel {
         $card.Child = $sp
         $wallpaperGrid.Children.Add($card) | Out-Null
     }
-    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸后刷新 DSH 网页生效 · 玻璃材质与壁纸独立, 自行在 DSH 设置里组合"
+    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 壁纸写入 DSH 页面背景; 默认UI不透明白色会遮住它, 开启玻璃材质(DSH设置)后透出 · 刷新网页生效"
 }
 
 function Add-WallpaperFile {
@@ -817,9 +867,9 @@ function Add-WallpaperUrl {
         $dest = Join-Path $WallpaperDir ("wp-" + (Get-Date -Format "yyyyMMdd-HHmmss") + $ext)
         Invoke-WebRequest -Uri $u -OutFile $dest -UseBasicParsing -TimeoutSec 30
         Update-WallpaperPanel
-        $wallpaperHint.Text = "✓ 下载完成，点「设为背景」应用。"
+        Show-WallpaperHint "✓ 下载完成，点「设为背景」应用。"
     } catch {
-        $wallpaperHint.Text = "下载失败: $($_.Exception.Message)"
+        Show-WallpaperHint "下载失败: $($_.Exception.Message)"
     }
 }
 
