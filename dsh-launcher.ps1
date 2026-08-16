@@ -696,7 +696,7 @@ function Set-Wallpaper([string]$srcPath) {
         New-Item -ItemType Directory -Force -Path $script:WallpaperStatic | Out-Null
         Copy-Item -LiteralPath $srcPath -Destination (Join-Path $script:WallpaperStatic "current.png") -Force
         Update-WallpaperHtml $true
-        Show-WallpaperHint "✓ 壁纸已写入页面背景。注意: 默认UI是不透明白色, 会遮住壁纸——在 DSH 设置里开启玻璃材质后才能透出; 之后刷新网页(F5)生效。"
+        Show-WallpaperHint "✓ 壁纸已设为背景, 玻璃主题已开启。刷新 DSH 网页(F5)即可看到; 玻璃开关/背景源/模糊度随时在 DSH 设置-玻璃主题 里自己调。"
         return $true
     } catch {
         Show-WallpaperHint "设置失败: $($_.Exception.Message)"
@@ -708,16 +708,17 @@ function Reset-Wallpaper {
     try {
         Remove-Item -LiteralPath (Join-Path $script:WallpaperStatic "current.png") -Force -ErrorAction SilentlyContinue
         Update-WallpaperHtml $false
-        Show-WallpaperHint "✓ 已移除壁纸背景。刷新网页(F5)后恢复默认。"
+        Show-WallpaperHint "✓ 已移除壁纸背景。刷新网页(F5)后壁纸清空、背景源回到流体; 玻璃主题保持你当前的开关状态。"
     } catch {
         Show-WallpaperHint "恢复失败: $($_.Exception.Message)"
     }
 }
 
-# 改写 dist/index.html 内联样式 <style id="dsh-wallpaper-css">:
-#   $apply=$true  注入 body 壁纸背景(刷新 ?t= 时间戳防缓存; 样式块缺失时自动补插)
-#   $apply=$false 清空为 background:none(不删样式块, 便于下次再设)
+# 改写 dist/index.html 内联 <style id="dsh-wallpaper-css"> + <script id="dsh-wallpaper-bridge">:
+#   $apply=$true  注入 body 壁纸背景(刷新 ?t= 时间戳防缓存; 样式/桥缺失时自动补插)
+#   $apply=$false 清空为 background:none(桥脚本在下次页面加载时据此清空 Aqua 壁纸槽)
 # 走 HTML 而非 JS 插件: index.html 每次请求从磁盘下发, 不受 JS 包缓存影响(坑#26)
+# 壁纸透出依赖官方 Aqua 玻璃(cordis 注册 ui-aqua); 桥把壁纸喂给 Aqua 的 localStorage 槽(坑#28)
 function Update-WallpaperHtml([bool]$apply) {
     $html = Join-Path (Split-Path $script:WallpaperStatic -Parent) "index.html"
     if (-not (Test-Path -LiteralPath $html)) { return }
@@ -739,6 +740,14 @@ function Update-WallpaperHtml([bool]$apply) {
                      "      body{background:url(/wallpaper/current.png?t=$ts) center/cover no-repeat fixed !important;}`n" +
                      "    </style>`n  </head>"
             $text = $text.Replace('</head>', $block)
+        }
+        # 桥接脚本缺失时补插(常量文本; DSH 更新可能单独冲掉它)
+        if (-not $text.Contains('dsh-wallpaper-bridge')) {
+            $bridge = "    <script id=`"dsh-wallpaper-bridge`">`n" +
+                      "      /* 壁纸中心桥: 把启动器写入的壁纸喂给官方 Aqua 的 localStorage 槽。 */`n" +
+                      "      (function(){try{var s=document.getElementById('dsh-wallpaper-css');if(!s)return;var k='dsh.wallpaper.center.ts';var i=s.textContent.indexOf('wallpaper/current.png?t=');if(i<0){if(localStorage.getItem(k)){localStorage.setItem('dsh.ui-aqua.wallpaper','');localStorage.setItem('dsh.ui-aqua.background','fluid');localStorage.removeItem(k);}return;}var j=s.textContent.indexOf(')',i);var t=s.textContent.substring(i+24,j);if(localStorage.getItem(k)===t)return;localStorage.setItem('dsh.ui-aqua.wallpaper','/wallpaper/current.png?t='+t);localStorage.setItem('dsh.ui-aqua.background','wallpaper');localStorage.setItem('dsh.ui-aqua.enabled','true');localStorage.setItem(k,t);}catch(e){}})();`n" +
+                      "    </script>`n  </head>"
+            $text = $text.Replace('</head>', $bridge)
         }
     } else {
         $text = $text -replace 'body\{background:url\([^)]*\) center/cover no-repeat fixed !important;\}',
@@ -841,7 +850,7 @@ function Update-WallpaperPanel {
         $card.Child = $sp
         $wallpaperGrid.Children.Add($card) | Out-Null
     }
-    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 壁纸写入 DSH 页面背景; 默认UI不透明白色会遮住它, 开启玻璃材质(DSH设置)后透出 · 刷新网页生效"
+    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸后自动开启玻璃(Aqua)以透出壁纸, 玻璃可随时在 DSH 设置-玻璃主题 里关 · 刷新网页生效"
 }
 
 function Add-WallpaperFile {
