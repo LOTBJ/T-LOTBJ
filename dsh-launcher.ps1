@@ -69,6 +69,7 @@ $SessionsDir = Join-Path $DshHome "sessions"
 $SkillsRoot  = Join-Path $DshHome "skills"
 $BackupsRoot = Join-Path $DshHome "backups"
 $PetCfgFile  = Join-Path $DshHome "launcher-pet.json"
+$WallpaperDir = Join-Path $DshHome "wallpapers"
 $Url         = "http://127.0.0.1:3080"
 
 # ------------------------------------------------------------- 工具函数 ----
@@ -484,6 +485,24 @@ $xaml = @'
                 </StackPanel>
               </Border>
             </StackPanel>
+
+            <!-- 壁纸中心 (自选壁纸: 预览/添加/URL下载/设为背景/删除) -->
+            <StackPanel x:Name="PanelWallpaper" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
+              <Border CornerRadius="20" Background="#F2FFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="680">
+                <StackPanel>
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="壁 纸 中 心" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
+                    <TextBlock Text="用你自己的图(即梦/截图/下载)做 DSH 背景; 玻璃材质在 DSH 设置里自行开关, 互不干扰" Foreground="#8A919E" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                    <Button x:Name="BtnWallpaperAdd" Style="{StaticResource GhostBtn}" Content="➕ 添加图片" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    <Button x:Name="BtnWallpaperUrl" Style="{StaticResource GhostBtn}" Content="⬇️ URL 下载" FontSize="12" Margin="8,0,0,0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                  </StackPanel>
+                  <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="360" Margin="0,14,0,0">
+                    <WrapPanel x:Name="WallpaperGrid"/>
+                  </ScrollViewer>
+                  <TextBlock x:Name="WallpaperHint" Text="" Foreground="#8A919E" FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+              </Border>
+            </StackPanel>
           </Grid>
 
           <!-- footer 链接行 -->
@@ -491,6 +510,7 @@ $xaml = @'
             <Button x:Name="NavHome" Style="{StaticResource FooterLink}" Content="首页" Margin="0,0,14,0"/>
             <Button x:Name="NavEnv" Style="{StaticResource FooterLink}" Content="环境信息" Margin="0,0,14,0"/>
             <Button x:Name="NavSkills" Style="{StaticResource FooterLink}" Content="技能库" Margin="0,0,14,0"/>
+            <Button x:Name="NavWallpaper" Style="{StaticResource FooterLink}" Content="壁纸中心" Margin="0,0,14,0"/>
             <Button x:Name="NavSetup" Style="{StaticResource FooterLink}" Content="环境装配" Margin="0,0,14,0"/>
             <Button x:Name="NavLogs" Style="{StaticResource FooterLink}" Content="运行日志" Margin="0,0,14,0"/>
             <Button x:Name="NavBackup" Style="{StaticResource FooterLink}" Content="配置备份" Margin="0,0,14,0"/>
@@ -540,6 +560,8 @@ $envRows = $window.FindName("EnvRows")
 $skillCards = $window.FindName("SkillCards")
 $skillCountText = $window.FindName("SkillCountText")
 $setupState = $window.FindName("SetupState")
+$wallpaperGrid = $window.FindName("WallpaperGrid")
+$wallpaperHint = $window.FindName("WallpaperHint")
 $setupLogBox = $window.FindName("SetupLogBox")
 
 $panels = @{
@@ -547,12 +569,14 @@ $panels = @{
     env     = $window.FindName("PanelEnv")
     skills  = $window.FindName("PanelSkills")
     setup   = $window.FindName("PanelSetup")
+    wallpaper = $window.FindName("PanelWallpaper")
 }
 $navBtns = @{
     home   = $window.FindName("NavHome")
     env    = $window.FindName("NavEnv")
     skills = $window.FindName("NavSkills")
     setup  = $window.FindName("NavSetup")
+    wallpaper = $window.FindName("NavWallpaper")
 }
 
 # ------------------------------------------------------------ 全局状态 ----
@@ -612,6 +636,7 @@ function Set-Panel([string]$name) {
     if ($name -eq "skills") { Update-SkillsPanel }
     if ($name -eq "home") { Update-OpenPanel }
     if ($name -eq "setup") { Update-SetupPanel }
+    if ($name -eq "wallpaper") { Update-WallpaperPanel }
 }
 
 function Set-DotColor($dot, [string]$color) {
@@ -660,6 +685,130 @@ function Update-SetupPanel {
     if ($dsh)  { $lines += "dsh  ✓ $dsh" } else { $lines += "dsh  ✗ 未安装 → 点「一键装配」自动下载安装" }
     $setupState.Text = ($lines -join "`n")
     if (-not $script:setupRunning) { $setupLogBox.Text = "" }
+}
+
+# ------------------------------------------------------------ 壁纸中心 ----
+$script:WallpaperStatic = "C:\Users\tang\AppData\Local\npm-cache\_npx\1e7f6d9597241db0\node_modules\@deepseek-ai\dsh-web-frontend\dist\wallpaper"
+
+function Set-Wallpaper([string]$srcPath) {
+    try {
+        New-Item -ItemType Directory -Force -Path $script:WallpaperStatic | Out-Null
+        Copy-Item -LiteralPath $srcPath -Destination (Join-Path $script:WallpaperStatic "current.png") -Force
+        $wallpaperHint.Text = "✓ 壁纸已设为背景。刷新 DSH 网页(F5)即可看到; 玻璃材质请在 DSH 设置里自行开关。"
+        return $true
+    } catch {
+        $wallpaperHint.Text = "设置失败: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Update-WallpaperPanel {
+    $wallpaperGrid.Children.Clear()
+    New-Item -ItemType Directory -Force -Path $WallpaperDir | Out-Null
+    $files = @(Get-ChildItem -LiteralPath $WallpaperDir -File | Where-Object { $_.Extension -match '\.(png|jpg|jpeg|webp|bmp|gif)$' } | Sort-Object LastWriteTime -Descending)
+    $cur = Join-Path $script:WallpaperStatic "current.png"
+    if ($files.Count -eq 0) {
+        $t = [System.Windows.Controls.TextBlock]::new()
+        $t.Text = "壁纸库是空的。点「➕ 添加图片」选你本地图（即梦下载的图直接选），或「⬇️ URL 下载」粘链接。"
+        $t.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#8A919E"))
+        $t.FontSize = 12
+        $t.TextWrapping = [System.Windows.TextWrapping]::Wrap
+        $t.Width = 560
+        $wallpaperGrid.Children.Add($t) | Out-Null
+        $wallpaperHint.Text = "壁纸库: $WallpaperDir"
+        return
+    }
+    $isCurrent = $false
+    if (Test-Path -LiteralPath $cur) { $isCurrent = $true }
+    foreach ($f in $files) {
+        $card = [System.Windows.Controls.Border]::new()
+        $card.Width = 190
+        $card.CornerRadius = [System.Windows.CornerRadius]::new(12)
+        $card.Background = [System.Windows.Media.Brushes]::White
+        $card.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#E0E4EC"))
+        $card.BorderThickness = [System.Windows.Thickness]::new(1)
+        $card.Margin = [System.Windows.Thickness]::new(0, 0, 12, 12)
+        $sp = [System.Windows.Controls.StackPanel]::new()
+        # 缩略图
+        $img = [System.Windows.Controls.Image]::new()
+        $img.Width = 188
+        $img.Height = 105
+        $img.Stretch = [System.Windows.Media.Stretch]::UniformToFill
+        try {
+            $bi = [System.Windows.Media.Imaging.BitmapImage]::new()
+            $bi.BeginInit()
+            $bi.UriSource = [System.Uri]::new($f.FullName)
+            $bi.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+            $bi.DecodePixelWidth = 376
+            $bi.EndInit()
+            $bi.Freeze()
+            $img.Source = $bi
+        } catch { }
+        # 名称
+        $nm = [System.Windows.Controls.TextBlock]::new()
+        $nm.Text = $f.Name
+        $nm.FontSize = 11
+        $nm.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#3D4350"))
+        $nm.Margin = [System.Windows.Thickness]::new(8, 6, 8, 0)
+        $nm.TextTrimming = [System.Windows.TextTrimming]::CharacterEllipsis
+        # 按钮行
+        $btns = [System.Windows.Controls.StackPanel]::new()
+        $btns.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+        $btns.Margin = [System.Windows.Thickness]::new(8, 6, 8, 8)
+        $bSet = [System.Windows.Controls.Button]::new()
+        $bSet.Content = "✅ 设为背景"
+        $bSet.FontSize = 11
+        $bSet.Style = $window.FindResource("GhostBtn")
+        $bSet.Margin = [System.Windows.Thickness]::new(0, 0, 6, 0)
+        $path = $f.FullName
+        $bSet.Add_Click({ param($s, $e) Set-Wallpaper $path })
+        $bDel = [System.Windows.Controls.Button]::new()
+        $bDel.Content = "🗑"
+        $bDel.FontSize = 11
+        $bDel.Style = $window.FindResource("GhostBtn")
+        $bDel.Add_Click({
+            param($s, $e)
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            Update-WallpaperPanel
+        })
+        $btns.Children.Add($bSet) | Out-Null
+        $btns.Children.Add($bDel) | Out-Null
+        $sp.Children.Add($img) | Out-Null
+        $sp.Children.Add($nm) | Out-Null
+        $sp.Children.Add($btns) | Out-Null
+        $card.Child = $sp
+        $wallpaperGrid.Children.Add($card) | Out-Null
+    }
+    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸后刷新 DSH 网页生效 · 玻璃材质与壁纸独立, 自行在 DSH 设置里组合"
+}
+
+function Add-WallpaperFile {
+    Add-Type -AssemblyName System.Windows.Forms
+    $dlg = [System.Windows.Forms.OpenFileDialog]::new()
+    $dlg.Filter = "图片文件|*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif"
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        New-Item -ItemType Directory -Force -Path $WallpaperDir | Out-Null
+        $dest = Join-Path $WallpaperDir ([System.IO.Path]::GetFileName($dlg.FileName))
+        Copy-Item -LiteralPath $dlg.FileName -Destination $dest -Force
+        Update-WallpaperPanel
+    }
+}
+
+function Add-WallpaperUrl {
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    $u = [Microsoft.VisualBasic.Interaction]::InputBox("粘贴图片链接（jpg/png/webp）：", "URL 下载壁纸", "")
+    if (-not $u) { return }
+    try {
+        $ext = [System.IO.Path]::GetExtension($u)
+        if ($ext -notmatch '\.(png|jpg|jpeg|webp|bmp|gif)$') { $ext = ".png" }
+        New-Item -ItemType Directory -Force -Path $WallpaperDir | Out-Null
+        $dest = Join-Path $WallpaperDir ("wp-" + (Get-Date -Format "yyyyMMdd-HHmmss") + $ext)
+        Invoke-WebRequest -Uri $u -OutFile $dest -UseBasicParsing -TimeoutSec 30
+        Update-WallpaperPanel
+        $wallpaperHint.Text = "✓ 下载完成，点「设为背景」应用。"
+    } catch {
+        $wallpaperHint.Text = "下载失败: $($_.Exception.Message)"
+    }
 }
 
 function Start-SetupDsh {
@@ -919,6 +1068,7 @@ $window.FindName("NavHome").Add_Click({ Set-Panel "home" })
 $window.FindName("NavEnv").Add_Click({ Set-Panel "env" })
 $window.FindName("NavSkills").Add_Click({ Set-Panel "skills" })
 $window.FindName("NavSetup").Add_Click({ Set-Panel "setup" })
+$window.FindName("NavWallpaper").Add_Click({ Set-Panel "wallpaper" })
 $window.FindName("NavLogs").Add_Click({ if (Test-Path -LiteralPath $ErrLog) { Start-Process explorer.exe -ArgumentList "`"$ErrLog`"" } })
 $window.FindName("NavBackup").Add_Click({ if (Test-Path -LiteralPath $BackupsRoot) { Start-Process explorer.exe -ArgumentList "`"$BackupsRoot`"" } })
 $window.FindName("NavDshDir").Add_Click({ if (Test-Path -LiteralPath $DshHome) { Start-Process explorer.exe -ArgumentList "`"$DshHome`"" } })
@@ -928,6 +1078,8 @@ $window.FindName("BtnOpen").Add_Click({ Start-OpenFlow })
 $window.FindName("BtnRestart").Add_Click({ Start-RestartFlow $true })
 $window.FindName("BtnEnvRefresh").Add_Click({ Update-EnvPanel })
 $window.FindName("BtnSetupGo").Add_Click({ Start-SetupDsh })
+$window.FindName("BtnWallpaperAdd").Add_Click({ Add-WallpaperFile })
+$window.FindName("BtnWallpaperUrl").Add_Click({ Add-WallpaperUrl })
 $window.FindName("BtnOpenSkillsDir").Add_Click({ if (Test-Path -LiteralPath $SkillsRoot) { Start-Process explorer.exe -ArgumentList "`"$SkillsRoot`"" } })
 
 # 标题栏拖拽
