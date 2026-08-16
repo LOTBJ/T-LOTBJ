@@ -11,6 +11,18 @@
 # ============================================================================
 param([string]$Theme = "minimal", [switch]$HideConsole, [switch]$AutoTest, [switch]$Diag, [switch]$NoBusy)
 
+# 单实例保护: 防止双击快捷方式启动多个实例(多个桌宠/状态混乱)
+$script:isFirstInstance = $false
+$script:singleMutex = [System.Threading.Mutex]::new($true, "Global\DSHLauncher-Single", [ref]$script:isFirstInstance)
+if (-not $script:isFirstInstance) {
+    try {
+        Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h); [DllImport("user32.dll")] public static extern System.IntPtr FindWindow(string c, string n);' -Name WinAct -Namespace DSH
+        $h = [DSH.WinAct]::FindWindow($null, "DeepSeek Harness")
+        if ($h -ne [IntPtr]::Zero) { [DSH.WinAct]::SetForegroundWindow($h) | Out-Null }
+    } catch { }
+    exit 0
+}
+
 if ($HideConsole) {
     Add-Type -MemberDefinition @"
 [DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow();
@@ -372,20 +384,21 @@ $xaml = @'
       <!-- ============================ 极简视图 (官方浅色) ============================ -->
       <!-- ============ 极简视图 · 官网语言 v2 ============ -->
       <Grid x:Name="ViewMinimal" Background="#F9F8F8" Visibility="Visible">
-        <!-- 官网同款"纱布撒蓝": 顶部淡蓝晕染渐隐 -->
-        <Border Height="280" VerticalAlignment="Top" IsHitTestVisible="False">
+        <!-- 官网同款"纱布撒蓝": 顶部淡蓝晕染渐隐(加强版: 颜色更浓延伸更远) -->
+        <Border Height="340" VerticalAlignment="Top" IsHitTestVisible="False">
           <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-              <GradientStop Color="#9CC1E7" Offset="0"/>
+              <GradientStop Color="#A8CCF0" Offset="0"/>
+              <GradientStop Color="#4DF0F7FF" Offset="0.6"/>
               <GradientStop Color="#00FAFAFA" Offset="1"/>
             </LinearGradientBrush>
           </Border.Background>
         </Border>
-        <!-- 底部淡蓝氛围光(借鉴 DSH-Transparent-UI-Plugin: 底部径向淡蓝使页面不"落地") -->
-        <Border Height="240" VerticalAlignment="Bottom" IsHitTestVisible="False">
+        <!-- 底部淡蓝氛围光(借鉴 DSH-Transparent-UI-Plugin) -->
+        <Border Height="300" VerticalAlignment="Bottom" IsHitTestVisible="False">
           <Border.Background>
             <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
-              <GradientStop Color="#249CC1E7" Offset="0"/>
+              <GradientStop Color="#5C9CC1E7" Offset="0"/>
               <GradientStop Color="#00FAFAFA" Offset="1"/>
             </LinearGradientBrush>
           </Border.Background>
@@ -439,69 +452,56 @@ $xaml = @'
             <!-- 环境面板 -->
             <StackPanel x:Name="PanelEnv" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
               <Border CornerRadius="20" Background="#8CFFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="560">
-                <StackPanel>
-                  <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="环 境 信 息" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
-                    <TextBlock Text="本机 DSH 部署与运行状况" Foreground="#8A919E" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"/>
-                    <Button x:Name="BtnEnvRefresh" Style="{StaticResource GhostBtn}" Content="↻ 刷新" FontSize="12" HorizontalAlignment="Right"/>
+                <Grid>
+                  <Border Height="1" Background="#E6FFFFFF" VerticalAlignment="Top" HorizontalAlignment="Stretch" Margin="1,0"/>
+                  <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock Text="环 境 信 息" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
+                      <TextBlock Text="本机 DSH 部署与运行状况" Foreground="#8A919E" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                      <Button x:Name="BtnEnvRefresh" Style="{StaticResource GhostBtn}" Content="↻ 刷新" FontSize="12" HorizontalAlignment="Right"/>
+                    </StackPanel>
+                    <StackPanel x:Name="EnvRows" Margin="0,12,0,0"/>
                   </StackPanel>
-                  <StackPanel x:Name="EnvRows" Margin="0,12,0,0"/>
-                </StackPanel>
+                </Grid>
               </Border>
             </StackPanel>
 
             <!-- 技能面板 -->
             <StackPanel x:Name="PanelSkills" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
               <Border CornerRadius="20" Background="#8CFFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="600">
-                <StackPanel>
-                  <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="技 能 库" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="SkillCountText" Text="" Foreground="#8A919E" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center"/>
-                    <Button x:Name="BtnOpenSkillsDir" Style="{StaticResource GhostBtn}" Content="打开技能目录" FontSize="12" HorizontalAlignment="Right"/>
+                <Grid>
+                  <Border Height="1" Background="#E6FFFFFF" VerticalAlignment="Top" HorizontalAlignment="Stretch" Margin="1,0"/>
+                  <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock Text="技 能 库" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
+                      <TextBlock x:Name="SkillCountText" Text="" Foreground="#8A919E" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                      <Button x:Name="BtnOpenSkillsDir" Style="{StaticResource GhostBtn}" Content="打开技能目录" FontSize="12" HorizontalAlignment="Right"/>
+                    </StackPanel>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="340" Margin="0,12,0,0">
+                      <StackPanel x:Name="SkillCards"/>
+                    </ScrollViewer>
                   </StackPanel>
-                  <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="340" Margin="0,12,0,0">
-                    <StackPanel x:Name="SkillCards"/>
-                  </ScrollViewer>
-                </StackPanel>
+                </Grid>
               </Border>
             </StackPanel>
 
-            <!-- 重启面板 -->
-            <StackPanel x:Name="PanelRestart" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
-              <Border CornerRadius="20" Background="#8CFFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="580">
-                <StackPanel>
-                  <TextBlock Text="重 启 服 务" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
-                  <TextBlock Text="按端口 3080 找到占用进程并杀掉，再启动全新实例（配置损坏时自动安全模式重试）。" Foreground="#8A919E" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
-                  <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-                    <Ellipse x:Name="RestartDot" Width="9" Height="9" Fill="#F0A94A" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="RestartState" Text="当前服务状态未知" Foreground="#1E232C" FontSize="13.5" FontWeight="SemiBold" Margin="8,0,0,0"/>
-                  </StackPanel>
-                  <TextBlock x:Name="RestartDetail" Text="" Foreground="#8A919E" FontSize="12" Margin="17,6,0,0" TextWrapping="Wrap"/>
-                  <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
-                    <Button x:Name="BtnDoRestart" Style="{StaticResource PrimaryBtn}" Content="立即重启" Height="44" Background="#E05C5C" Padding="28,0"/>
-                    <Button x:Name="BtnRestartOpen" Style="{StaticResource GhostBtn}" Content="重启后打开浏览器" Height="44" Margin="14,0,0,0"/>
-                  </StackPanel>
-                  <TextBlock Text="最近错误日志" Foreground="#8A919E" FontSize="11" Margin="0,16,0,6"/>
-                  <Border CornerRadius="12" Background="#26E05C5C" BorderBrush="#55E05C5C" BorderThickness="1" Padding="12,10">
-                    <TextBlock x:Name="RestartLogBox" Text="" Foreground="#B05050" FontSize="11.5" FontFamily="Consolas" TextWrapping="Wrap" MaxHeight="120"/>
-                  </Border>
-                </StackPanel>
-              </Border>
-            </StackPanel>
             <!-- 环境装配面板 (一键下载安装 DSH 运行环境, 借鉴大肥鱼"别人一键装配"思路) -->
             <StackPanel x:Name="PanelSetup" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
               <Border CornerRadius="20" Background="#8CFFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="580">
-                <StackPanel>
-                  <TextBlock Text="环 境 装 配" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
-                  <TextBlock Text="新机器一键装配 DSH 运行环境：检测 node/npm → 自动下载安装 dsh → 生成配置，开箱即用。" Foreground="#8A919E" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
-                  <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-                    <TextBlock x:Name="SetupState" Text="检测中…" Foreground="#1E232C" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                    <Button x:Name="BtnSetupGo" Style="{StaticResource PrimaryBtn}" Content="🔧 一键装配" Height="44" Background="#4D6BFE" Padding="26,0" HorizontalAlignment="Right"/>
+                <Grid>
+                  <Border Height="1" Background="#E6FFFFFF" VerticalAlignment="Top" HorizontalAlignment="Stretch" Margin="1,0"/>
+                  <StackPanel>
+                    <TextBlock Text="环 境 装 配" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
+                    <TextBlock Text="新机器一键装配 DSH 运行环境：检测 node/npm → 自动下载安装 dsh → 生成配置，开箱即用。" Foreground="#8A919E" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                      <TextBlock x:Name="SetupState" Text="检测中…" Foreground="#1E232C" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                      <Button x:Name="BtnSetupGo" Style="{StaticResource PrimaryBtn}" Content="🔧 一键装配" Height="44" Background="#4D6BFE" Padding="26,0" HorizontalAlignment="Right"/>
+                    </StackPanel>
+                    <Border CornerRadius="12" Background="#26FFFFFF" BorderBrush="#55FFFFFF" BorderThickness="1" Padding="12,10" Margin="0,14,0,0">
+                      <TextBlock x:Name="SetupLogBox" Text="" Foreground="#5B6472" FontSize="11.5" FontFamily="Consolas" TextWrapping="Wrap" MaxHeight="160"/>
+                    </Border>
                   </StackPanel>
-                  <Border CornerRadius="12" Background="#26FFFFFF" BorderBrush="#55FFFFFF" BorderThickness="1" Padding="12,10" Margin="0,14,0,0">
-                    <TextBlock x:Name="SetupLogBox" Text="" Foreground="#5B6472" FontSize="11.5" FontFamily="Consolas" TextWrapping="Wrap" MaxHeight="160"/>
-                  </Border>
-                </StackPanel>
+                </Grid>
               </Border>
             </StackPanel>
           </Grid>
@@ -633,10 +633,6 @@ $openDot   = $window.FindName("OpenDot")
 $openState = $window.FindName("OpenState")
 $openDetail = $window.FindName("OpenDetail")
 $openLogBox = $window.FindName("OpenLogBox")
-$restartDot = $window.FindName("RestartDot")
-$restartState = $window.FindName("RestartState")
-$restartDetail = $window.FindName("RestartDetail")
-$restartLogBox = $window.FindName("RestartLogBox")
 $envRows = $window.FindName("EnvRows")
 $skillCards = $window.FindName("SkillCards")
 $skillCountText = $window.FindName("SkillCountText")
@@ -655,7 +651,6 @@ $petEmoji = $petWin.FindName("PetEmoji")
 
 $panels = @{
     home    = $window.FindName("PanelHome")
-    restart = $window.FindName("PanelRestart")
     env     = $window.FindName("PanelEnv")
     skills  = $window.FindName("PanelSkills")
     setup   = $window.FindName("PanelSetup")
@@ -885,8 +880,8 @@ function Update-Pet {
         }
     }
 
-    # 帧推进 (注视时冻结动作帧)
-    if ($script:petHasAtlas) {
+    # 帧推进 (注视时冻结动作帧; 拖动中也不切帧——layered 窗口移动时动画重绘会产生残影重影)
+    if ($script:petHasAtlas -and -not $p.drag) {
         if ($null -ne $p.gaze) {
             Set-PetFrame $p.gaze.Row $p.gaze.Col
         } else {
@@ -933,6 +928,7 @@ function Update-Pet {
         }
     } elseif ($p.drag) {
         $targetSpeed = 0.0
+        $p.speed = 0.0   # 清掉走路惯性, 否则拖动时窗口被惯性+手动双重移动
     } else {
         switch ($p.mode) {
             "roam" {
@@ -1108,7 +1104,6 @@ function Set-Panel([string]$name) {
     }
     if ($name -eq "env") { Update-EnvPanel }
     if ($name -eq "skills") { Update-SkillsPanel }
-    if ($name -eq "restart") { Update-RestartPanel }
     if ($name -eq "home") { Update-OpenPanel }
     if ($name -eq "setup") { Update-SetupPanel }
 }
@@ -1131,21 +1126,6 @@ function Update-OpenPanel {
         $openDetail.Text = "点击「打开 Harness」将自动启动服务（约 5-15 秒）并打开浏览器"
     }
     $openLogBox.Text = Get-LogTail $OutLog
-}
-
-function Update-RestartPanel {
-    $up = Test-ServerUp
-    $pid2 = Get-ServerPid
-    if ($up) {
-        Set-DotColor $restartDot "#22A06B"
-        $restartState.Text = "服务运行中 (PID $pid2)"
-        $restartDetail.Text = "重启会先释放 3080 端口，再启动全新实例。若配置损坏，将自动以安全模式重试。"
-    } else {
-        Set-DotColor $restartDot "#F0A94A"
-        $restartState.Text = "服务未运行"
-        $restartDetail.Text = "当前没有服务在运行，点击「立即重启」将直接启动新实例。"
-    }
-    $restartLogBox.Text = Get-LogTail $ErrLog
 }
 
 # ------------------------------------------------------------ 环境装配(一键下载安装 DSH) ----
@@ -1361,13 +1341,14 @@ function Start-OpenFlow {
 function Start-RestartFlow([bool]$openBrowser) {
     if ($script:busy) { return }
     $script:busy = $true
-    $restartState.Text = "正在重启…"
-    $restartDetail.Text = "释放端口 3080 → 启动新实例"
+    $openState.Text = "正在重启…"
+    Set-PetTalk "收到，正在重启，等我一下下~"
     Stop-DshServer
     $ok = Start-DshServer
     if (-not $ok) {
-        $restartState.Text = "启动失败：未找到 dsh 可执行文件"
+        $openState.Text = "启动失败：未找到 dsh 可执行文件"
         $script:busy = $false
+        Invoke-PetSad "呜…没找到 dsh，装一下环境吧~"
         return
     }
     $script:restartWaited = 0
@@ -1378,15 +1359,15 @@ function Start-RestartFlow([bool]$openBrowser) {
         if (Test-ServerUp) {
             $script:restartPoll.Stop()
             $script:busy = $false
-            Update-RestartPanel
             Update-StatusAll
-            $restartState.Text = "重启完成 ✓"
+            $openState.Text = "重启完成 ✓"
+            Set-PetTalk "重启好啦！"
             if ($openBrowser) { Start-DshUrl }
         } elseif ($script:restartWaited -gt 45) {
             $script:restartPoll.Stop()
             $script:busy = $false
-            $restartState.Text = "重启超时（可能已安全模式重试中）"
-            $restartDetail.Text = Get-LogTail $ErrLog
+            $openState.Text = "重启超时，请查看日志"
+            $openLogBox.Text = Get-LogTail $ErrLog
             Invoke-PetSad "呜…重启超时了，帮我看看日志嘛~"
         }
     })
@@ -1648,9 +1629,7 @@ $window.FindName("NavDshDir").Add_Click({ if (Test-Path -LiteralPath $DshHome) {
 
 # 主操作
 $window.FindName("BtnOpen").Add_Click({ Start-OpenFlow })
-$window.FindName("BtnRestart").Add_Click({ Set-Panel "restart" })
-$window.FindName("BtnDoRestart").Add_Click({ Start-RestartFlow $false })
-$window.FindName("BtnRestartOpen").Add_Click({ Start-RestartFlow $true })
+$window.FindName("BtnRestart").Add_Click({ Start-RestartFlow $true })
 $window.FindName("BtnEnvRefresh").Add_Click({ Update-EnvPanel })
 $window.FindName("BtnSetupGo").Add_Click({ Start-SetupDsh })
 $window.FindName("BtnOpenSkillsDir").Add_Click({ if (Test-Path -LiteralPath $SkillsRoot) { Start-Process explorer.exe -ArgumentList "`"$SkillsRoot`"" } })
@@ -1857,7 +1836,6 @@ Set-PetAnim "idle"
 
 Update-StatusAll
 Update-OpenPanel
-Update-RestartPanel
 
 # 桌宠默认显示(独立透明置顶窗口), 可用主界面顶栏开关隐藏
 $petWin.Show()
