@@ -696,69 +696,24 @@ $script:innerLines = @(
     "我好像把气泡压到主人桌面图标了"
 )
 
-# ------------------------------------------------------------ 桌宠引擎(标准 Codex 图集) ----
-# 图集: 8x11, 192x208/格; 前 9 行 = 动作(待机/右走/左走/挥手/跳跃/失败/等待/思考/检查),
-# 第 9-10 行 = 16 方向注视。规范借鉴 GaoHaoSong/Desktop-Pet (MIT)。
+# ------------------------------------------------------------ 桌宠引擎(大肥鱼式三视图) ----
+# 形象: 官方鲸鱼娘三视图(正面/侧面/背面, 白底已抠透明) + 程序动画(呼吸/摇摆/弹跳/咀嚼/拉伸)
+# 借鉴 大肥鱼桌宠(1190fasheqi/dafeiyu-pet, MIT): 左右走=侧面+镜像, 其余=正面+程序动作
 Add-Type -AssemblyName System.Windows.Forms
 
-$script:cellW = 192; $script:cellH = 208
-$script:frames = @{}
-$script:petHasAtlas = $false
-try {
-    $atlas = New-Bitmap $PetAtlas
-    $atlas.Freeze()
-    for ($r = 0; $r -lt 11; $r++) {
-        for ($c = 0; $c -lt 8; $c++) {
-            $cb = [System.Windows.Media.Imaging.CroppedBitmap]::new()
-            $cb.BeginInit()
-            $cb.Source = $atlas
-            $cb.SourceRect = [System.Windows.Int32Rect]::new($c * $script:cellW, $r * $script:cellH, $script:cellW, $script:cellH)
-            $cb.EndInit()
-            $cb.Freeze()
-            $script:frames["$r,$c"] = $cb
-        }
-    }
-    $script:petHasAtlas = $true
-} catch {
-    Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("ATLAS-ERR: " + $_.Exception.Message)
-}
-
-# 情绪动作图集(4x4=16帧 192x208/格, 与主图集同规格): excited 兴奋 / curious 好奇
-foreach ($emoName in @("excited", "curious")) {
+$script:ViewDir = Join-Path $PetDir "views"
+$script:views = @{}
+foreach ($vn in @("front", "side", "back")) {
     try {
-        $emoPath = Join-Path $PetDir "$emoName-atlas.png"
-        if (Test-Path -LiteralPath $emoPath) {
-            $emoAtlas = New-Bitmap $emoPath
-            $emoAtlas.Freeze()
-            for ($i = 0; $i -lt 16; $i++) {
-                $cb2 = [System.Windows.Media.Imaging.CroppedBitmap]::new()
-                $cb2.BeginInit()
-                $cb2.Source = $emoAtlas
-                $cb2.SourceRect = [System.Windows.Int32Rect]::new(($i % 4) * $script:cellW, [int][Math]::Floor($i / 4) * $script:cellH, $script:cellW, $script:cellH)
-                $cb2.EndInit()
-                $cb2.Freeze()
-                $script:frames["$emoName,$i"] = $cb2
-            }
+        $vp = Join-Path $script:ViewDir "$vn.png"
+        if (Test-Path -LiteralPath $vp) {
+            $vb = New-Bitmap $vp
+            $vb.Freeze()
+            $script:views[$vn] = $vb
         }
     } catch {
-        Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("EMO-ERR " + $emoName + ": " + $_.Exception.Message)
+        Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("VIEW-ERR " + $vn + ": " + $_.Exception.Message)
     }
-}
-
-# 动画表: 帧序列 + 每帧时长(ms) — 同标准播放器
-$script:anims = @{
-    idle   = @{ Row = 0; F = @(0,1,2,3,4,5,6);   D = @(280,110,110,140,140,320,320) }
-    right  = @{ Row = 1; F = @(0,1,2,3,4,5,6,7); D = @(120,120,120,120,120,120,120,220) }
-    left   = @{ Row = 2; F = @(0,1,2,3,4,5,6,7); D = @(120,120,120,120,120,120,120,220) }
-    wave   = @{ Row = 3; F = @(0,1,2,3);         D = @(140,140,140,280) }
-    jump   = @{ Row = 4; F = @(0,1,2,3,4);       D = @(140,140,140,140,280) }
-    failed = @{ Row = 5; F = @(0,1,2,3,4,5,6,7); D = @(140,140,140,140,140,140,140,240) }
-    wait   = @{ Row = 6; F = @(0,1,2,3,4,5);     D = @(150,150,150,150,150,260) }
-    think  = @{ Row = 7; F = @(0,1,2,3,4,5);     D = @(120,120,120,120,120,220) }
-    review = @{ Row = 8; F = @(0,1,2,3,4,5);     D = @(150,150,150,150,150,280) }
-    # 情绪动作(独立图集): 16 帧循环
-    excited = @{ Row = -1; Custom = "excited"; F = @(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15); D = @(80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80) }
-    curious = @{ Row = -1; Custom = "curious"; F = @(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15); D = @(100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100) }
 }
 
 $script:sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -792,6 +747,9 @@ $script:pet = @{
     chatting = $false
     sleeping = $false
     sleepT   = 0
+    view    = "front"   # 三视图: front/side/back
+    face    = 1         # 侧面镜像: 1=右 -1=左
+    jumpT   = 0.0       # 程序跳跃进度
 }
 $script:petScale = [System.Windows.Media.ScaleTransform]::new(1, 1)
 $script:petRotate = [System.Windows.Media.RotateTransform]::new(0)
@@ -800,31 +758,31 @@ $petGroup.Children.Add($script:petRotate) | Out-Null
 $petGroup.Children.Add($script:petScale) | Out-Null
 $petHost.RenderTransform = $petGroup
 $petHost.RenderTransformOrigin = [System.Windows.Point]::new(0.5, 0.95)
-$petImage.Width = 269
-$petImage.Height = 291
-$petImage.Stretch = [System.Windows.Media.Stretch]::Fill
+$petImage.Width = 240
+$petImage.Height = 320
+$petImage.Stretch = [System.Windows.Media.Stretch]::Uniform
 $script:heroTT = [System.Windows.Media.TranslateTransform]::new(0, 0)
 $window.FindName("HeroWhale").RenderTransform = $script:heroTT
 
-$script:lastFrameKey = ""
-function Set-PetFrame([int]$row, [int]$col, [string]$custom = "") {
-    if (-not $script:petHasAtlas) { return }
-    # 帧缓存: 同一帧不重复设置 Image.Source(注视/待机每 tick 重复设同一帧是主要浪费)
-    $key = if ($custom) { "$custom,$col" } else { "$row,$col" }
-    if ($key -eq $script:lastFrameKey) { return }
-    $script:lastFrameKey = $key
-    $src = $script:frames[$key]
-    if ($src) { $petImage.Source = $src }
+$script:lastViewKey = ""
+function Set-PetView([string]$v) {
+    if ($v -eq $script:lastViewKey) { return }
+    $src = $script:views[$v]
+    if ($src) {
+        $script:lastViewKey = $v
+        $petImage.Source = $src
+    }
 }
 
+# 动作 → 视图切换(大肥鱼式): 左右走=侧面+镜像, 其余=正面; 动作感靠程序动画(摇摆/弹跳/表情)
 function Set-PetAnim([string]$name, [bool]$loop = $true) {
-    $a = $script:anims[$name]
-    if (-not $a) { return }
-    $script:pet.anim = $name
-    $script:pet.aIdx = 0
-    $script:pet.aLoop = $loop
-    $script:pet.aNext = $script:sw.ElapsedMilliseconds + $a.D[0]
-    Set-PetFrame $a.Row $a.F[0] $a.Custom
+    $p = $script:pet
+    $p.anim = $name
+    switch ($name) {
+        "right" { Set-PetView "side"; $p.face = 1 }
+        "left"  { Set-PetView "side"; $p.face = -1 }
+        default { Set-PetView "front"; $p.face = 1 }
+    }
 }
 
 function Set-PetEmoji([string]$e) {
@@ -848,19 +806,8 @@ function Get-PetMouse {
 }
 
 function Update-PetGaze {
-    # 空闲时鼠标靠近 → 16 方向注视 (规范: Atan2(dx,-dy), 22.5°/桶)
-    $p = $script:pet
-    $p.gaze = $null
-    if (-not $script:petHasAtlas) { return }
-    if ($p.anim -ne "idle") { return }
-    $pt = Get-PetMouse
-    $dx = $pt.X - ($p.x + 135)
-    $dy = $pt.Y - ($p.y - 140)
-    if ([Math]::Sqrt($dx * $dx + $dy * $dy) -gt 320) { return }
-    $ang = [Math]::Atan2($dx, -$dy) * 180.0 / [Math]::PI
-    if ($ang -lt 0) { $ang += 360.0 }
-    $idx = [int][Math]::Round($ang / 22.5) % 16
-    if ($idx -lt 8) { $p.gaze = @{ Row = 9; Col = $idx } } else { $p.gaze = @{ Row = 10; Col = $idx - 8 } }
+    # 三视图无 16 方向注视帧; 保留函数占位(调用点兼容), 注视感由 face 转向 + 摇摆体现
+    $script:pet.gaze = $null
 }
 
 # 待机小动作(大肥鱼式): 小概率跳/转体摇摆/拉伸/心声冒泡
@@ -911,28 +858,7 @@ function Update-Pet {
         $p.sleepT = 0
     }
 
-    # 帧推进 (注视时冻结动作帧; 拖动中也不切帧——layered 窗口移动时动画重绘会产生残影重影)
-    if ($script:petHasAtlas -and -not $p.drag) {
-        if ($null -ne $p.gaze) {
-            Set-PetFrame $p.gaze.Row $p.gaze.Col
-        } else {
-            $a = $script:anims[$p.anim]
-            if ($script:sw.ElapsedMilliseconds -ge $p.aNext) {
-                $p.aIdx++
-                if ($p.aIdx -ge $a.F.Count) {
-                    if ($p.aLoop) { $p.aIdx = 0 }
-                    else {
-                        Set-PetAnim "idle"
-                        $p.t = 0
-                        $p.max = 30 + $script:rand.Next(40)
-                    }
-                }
-                $p.aNext = $script:sw.ElapsedMilliseconds + $a.D[$p.aIdx]
-                Set-PetFrame $a.Row $a.F[$p.aIdx] $a.Custom
-            }
-        }
-    }
-
+    # 三视图无帧推进: 动作感全部来自下面的程序动画(呼吸/摇摆/弹跳/咀嚼/拉伸/跳跃)
     $breath = 1 + 0.012 * [Math]::Sin($p.phase)
     $targetSpeed = 0.0
 
@@ -1024,8 +950,7 @@ function Update-Pet {
         }
     }
 
-    # 本帧注视即时生效 (覆盖上面刚推进的待机帧)
-    if ($null -ne $p.gaze -and $script:petHasAtlas) { Set-PetFrame $p.gaze.Row $p.gaze.Col }
+    # 三视图无注视帧: 注视感已由 face 转向 + 摇摆体现
 
     # 加减速惯性
     if ($p.speed -lt $targetSpeed) { $p.speed = [Math]::Min($targetSpeed, $p.speed + 0.35) }
@@ -1071,16 +996,18 @@ function Update-Pet {
     $script:petRotate.Angle = [Math]::Sin($p.phase * 2.2) * $swing + $lean + $actRot
     # 进食咀嚼挤压: 身体随咀嚼微微压缩回弹
     $chew = if ($p.feeding) { 1 - 0.045 * [Math]::Abs([Math]::Sin($p.phase * 7)) } else { 1 }
-    # 不做镜像翻转: Codex 图集 left 行/注视帧本身自带朝向(原版 SetFrame 无翻转, 翻转会导致倒着走)
-    $script:petScale.ScaleX = $breath * $script:petSize * $chew * (1 + $actSx)
+    # 镜像: 侧面视图 face=-1 时水平翻转(大肥鱼式 scale(-1,1)); 正面/背面不翻转
+    $mirror = if ($p.view -eq "side") { $p.face } else { 1 }
+    $script:petScale.ScaleX = $mirror * $breath * $script:petSize * $chew * (1 + $actSx)
     $script:petScale.ScaleY = $breath * $script:petSize * $chew * (1 + $actSy)
 
     # 跳跃抛物线 / 走路弹跳 (上下起伏让步伐更生动) / 走路小跳脉冲
     $jumpY = 0.0
     if ($p.anim -eq "jump") {
-        $a = $script:anims["jump"]
-        $prog = $p.aIdx / [Math]::Max(1, $a.F.Count - 1)
-        $jumpY = -90 * [Math]::Sin([Math]::PI * $prog)
+        # 程序跳跃抛物线(无帧动画, 用时间驱动)
+        $p.jumpT += 0.10
+        $jumpY = -80 * [Math]::Sin([Math]::Min(1.0, $p.jumpT) * [Math]::PI)
+        if ($p.jumpT -ge 1.0) { $p.jumpT = 0.0; Set-PetAnim "idle"; $p.t = 0; $p.max = 40 + $script:rand.Next(40) }
     } elseif ($walking) {
         $jumpY = -[Math]::Abs([Math]::Sin($p.phase * 2.8)) * 16
     }
@@ -1472,6 +1399,9 @@ function Invoke-PetClicked([bool]$force = $false) {
     Set-PetTalk "怎么啦？想让我做什么？" $true $true
     Set-PetAnim "wave" $false
     Set-PetEmoji "👋"
+    # 挥手感: 转体摇摆程序动作(大肥鱼式)
+    $script:pet.action = "sway"
+    $script:pet.actionT = 1.0
 }
 
 function Invoke-PetJump {
@@ -1925,7 +1855,7 @@ if ($Diag) {
         $pet = $petImage
         Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG hero: src=" + ($null -ne $hero.Source) + " w=" + $hero.ActualWidth + " h=" + $hero.ActualHeight + " vis=" + $hero.Visibility)
         Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG pet:  src=" + ($null -ne $pet.Source) + " w=" + $pet.ActualWidth + " h=" + $pet.ActualHeight)
-        Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG pet2:  anim=" + $script:pet.anim + " aIdx=" + $script:pet.aIdx + " mode=" + $script:pet.mode + " busy=" + $script:pet.busy + " size=" + $script:petSize + " hasAtlas=" + $script:petHasAtlas + " petWinVis=" + $petWin.IsVisible)
+        Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG pet2:  anim=" + $script:pet.anim + " view=" + $script:pet.view + " mode=" + $script:pet.mode + " busy=" + $script:pet.busy + " size=" + $script:petSize + " petWinVis=" + $petWin.IsVisible)
         Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG emoji: vis=" + $petEmoji.Visibility + " text=" + $petEmoji.Text + " talkCd=" + $script:pet.talkCd)
         Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG window: actualW=" + $window.ActualWidth + " actualH=" + $window.ActualHeight)
         $window.Close()
