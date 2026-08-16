@@ -764,7 +764,7 @@ function Set-Wallpaper([string]$srcPath) {
         } elseif ($plan.mode -eq 'scale') {
             Show-WallpaperHint "✓ 原图偏大, 已按屏幕尺寸缩小后应用。刷新 DSH 网页(F5)即可看到。"
         } elseif ($plan.mode -eq 'pad') {
-            Show-WallpaperHint "✓ 原图偏小/比例不同: 已白底填充居中(不放大不变形)。刷新 DSH 网页(F5)即可看到。"
+            Show-WallpaperHint "✓ 原图偏小/比例不同: 已等比放大到屏幕能承受的最大尺寸, 短边白底填充居中。刷新 DSH 网页(F5)即可看到。"
         } else {
             Show-WallpaperHint "✓ 壁纸已按所选区域裁剪并设为背景。刷新 DSH 网页(F5)即可看到。"
         }
@@ -1142,8 +1142,9 @@ function Render-WallpaperCrop([string]$src, [System.Windows.Rect]$rect, [string]
     $ofs.Dispose()
 }
 
-# 白底填充(小图/单边偏小): 屏幕尺寸白画布 + 原图原生大小居中(不缩放, 保持清晰),
-# 超出屏幕的边居中裁剪(用户需求: 宽超了裁宽、长超了裁长, 短的方向上下/左右等分白底)
+# 白底填充(小图/单边偏小): 先按 contain 等比缩放——长边贴到屏幕边、短边留白,
+# 再居中到白色画布(用户需求: UI 10:10、图 2:1 → 图等比放大到 10:5, 上下各补 2.5 白)。
+# 不裁剪不变形, 与 object-fit: contain 一致
 function Render-WallpaperPad([string]$src, [string]$outPath) {
     $fs = [IO.File]::OpenRead($src)
     $bi = [System.Windows.Media.Imaging.BitmapImage]::new()
@@ -1153,24 +1154,22 @@ function Render-WallpaperPad([string]$src, [string]$outPath) {
     $bi.EndInit()
     $fs.Dispose()
     $bi.Freeze()
-    $iw = $bi.PixelWidth
-    $ih = $bi.PixelHeight
+    $iw = [double]$bi.PixelWidth
+    $ih = [double]$bi.PixelHeight
     Add-Type -AssemblyName System.Windows.Forms
     $scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     $tw = [int]$scr.Width
     $th = [int]$scr.Height
-    $sx = [Math]::Max(0, [int](($iw - $tw) / 2))
-    $sy = [Math]::Max(0, [int](($ih - $th) / 2))
-    $sw = [Math]::Min($iw, $tw)
-    $sh = [Math]::Min($ih, $th)
-    $dx = [Math]::Max(0.0, ($tw - $sw) / 2.0)
-    $dy = [Math]::Max(0.0, ($th - $sh) / 2.0)
-    $cb = [System.Windows.Media.Imaging.CroppedBitmap]::new($bi, [System.Windows.Int32Rect]::new($sx, $sy, $sw, $sh))
-    $cb.Freeze()
+    # contain 缩放系数: 长边贴边, 短边留白(系数 ≤ UI 承受的最大比例)
+    $scale = [Math]::Min($tw / $iw, $th / $ih)
+    $sw = $iw * $scale
+    $sh = $ih * $scale
+    $dx = ($tw - $sw) / 2.0
+    $dy = ($th - $sh) / 2.0
     $dv = [System.Windows.Media.DrawingVisual]::new()
     $dc = $dv.RenderOpen()
     $dc.DrawRectangle([System.Windows.Media.Brushes]::White, $null, [System.Windows.Rect]::new(0, 0, $tw, $th))
-    $dc.DrawImage($cb, [System.Windows.Rect]::new($dx, $dy, $sw, $sh))
+    $dc.DrawImage($bi, [System.Windows.Rect]::new($dx, $dy, $sw, $sh))
     $dc.Close()
     $rtb = [System.Windows.Media.Imaging.RenderTargetBitmap]::new($tw, $th, 96, 96, [System.Windows.Media.PixelFormats]::Pbgra32)
     $rtb.Render($dv)
@@ -1319,7 +1318,7 @@ function Update-WallpaperPanel {
         $card.Child = $sp
         $wallpaperGrid.Children.Add($card) | Out-Null
     }
-    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸自动适配: 匹配直接应用 / 大图缩小 / 小图白底填充居中 / 比例不同的大图弹裁剪窗 · 首卡「原版 UI」回出厂界面 · 刷新网页生效"
+    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸自动适配: 匹配直接应用 / 大图缩小 / 小图等比放大+白底填充 / 比例不同的大图弹裁剪窗 · 首卡「原版 UI」回出厂界面 · 刷新网页生效"
 }
 
 function Add-WallpaperFile {

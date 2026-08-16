@@ -87,35 +87,41 @@ if (-not (Test-BridgeOk $corrupted)) {
 }
 Say ("corrupted bridge repaired: {0} (expect True)" -f ((Test-BridgeOk $corrupted) -and -not $corrupted.Contains('t=999')))
 
-# ---- (4) pad render pixel test: 800x500 blue on 2048x1280 white canvas ----
-$srcImg = $p2
-$fs = [IO.File]::OpenRead($srcImg)
-$bi = New-Object System.Windows.Media.Imaging.BitmapImage
-$bi.BeginInit(); $bi.StreamSource = $fs; $bi.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad; $bi.EndInit()
-$fs.Dispose(); $bi.Freeze()
-$iw = $bi.PixelWidth; $ih = $bi.PixelHeight
-$tw = 2048; $th = 1280
-$sx = [Math]::Max(0, [int](($iw - $tw) / 2)); $sy = [Math]::Max(0, [int](($ih - $th) / 2))
-$sw = [Math]::Min($iw, $tw); $sh = [Math]::Min($ih, $th)
-$dx = [Math]::Max(0.0, ($tw - $sw) / 2.0); $dy = [Math]::Max(0.0, ($th - $sh) / 2.0)
-$cb = New-Object System.Windows.Media.Imaging.CroppedBitmap($bi, (New-Object System.Windows.Int32Rect($sx, $sy, $sw, $sh)))
-$cb.Freeze()
-$dv = New-Object System.Windows.Media.DrawingVisual
-$dc = $dv.RenderOpen()
-$dc.DrawRectangle([System.Windows.Media.Brushes]::White, $null, [System.Windows.Rect]::new(0, 0, $tw, $th))
-$dc.DrawImage($cb, [System.Windows.Rect]::new($dx, $dy, $sw, $sh))
-$dc.Close()
-$rtb = New-Object System.Windows.Media.Imaging.RenderTargetBitmap($tw, $th, 96, 96, [System.Windows.Media.PixelFormats]::Pbgra32)
-$rtb.Render($dv)
-$enc = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
-$enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($rtb))
-$padOut = Join-Path $env:TEMP 'pad-out.png'
-$ofs = [IO.File]::Open($padOut, [IO.FileMode]::Create)
-$enc.Save($ofs); $ofs.Dispose()
-$chk = New-Object System.Drawing.Bitmap($padOut)
-$corner = $chk.GetPixel(30, 30); $center = $chk.GetPixel(1024, 640); $above = $chk.GetPixel(1024, 100)
-Say ("pad size: {0}x{1}; corner={2},{3},{4} (expect 255,255,255); center={5},{6},{7} (expect blue 30,60,200); above-image={8},{9},{10} (expect white)" -f $chk.Width, $chk.Height, $corner.R, $corner.G, $corner.B, $center.R, $center.G, $center.B, $above.R, $above.G, $above.B)
-$chk.Dispose()
+# ---- (4) pad render pixel test: contain scale + white fill ----
+# case A: 400x800 portrait (1:2) -> scale=min(2048/400, 1280/800)=1.6 -> 640x1280, white bars left/right
+# case B: 2500x800 wide -> scale=min(2048/2500, 1280/800)=0.8192 -> 2048x655, white bars top/bottom
+function Test-Pad([string]$srcImg, [int]$tw, [int]$th, [string]$label, [int[]]$bluePts, [int[]]$whitePts) {
+    $fs = [IO.File]::OpenRead($srcImg)
+    $bi = New-Object System.Windows.Media.Imaging.BitmapImage
+    $bi.BeginInit(); $bi.StreamSource = $fs; $bi.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad; $bi.EndInit()
+    $fs.Dispose(); $bi.Freeze()
+    $iw = [double]$bi.PixelWidth; $ih = [double]$bi.PixelHeight
+    $scale = [Math]::Min($tw / $iw, $th / $ih)
+    $sw = $iw * $scale; $sh = $ih * $scale
+    $dx = ($tw - $sw) / 2.0; $dy = ($th - $sh) / 2.0
+    $dv = New-Object System.Windows.Media.DrawingVisual
+    $dc = $dv.RenderOpen()
+    $dc.DrawRectangle([System.Windows.Media.Brushes]::White, $null, [System.Windows.Rect]::new(0, 0, $tw, $th))
+    $dc.DrawImage($bi, [System.Windows.Rect]::new($dx, $dy, $sw, $sh))
+    $dc.Close()
+    $rtb = New-Object System.Windows.Media.Imaging.RenderTargetBitmap($tw, $th, 96, 96, [System.Windows.Media.PixelFormats]::Pbgra32)
+    $rtb.Render($dv)
+    $enc = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
+    $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($rtb))
+    $padOut = Join-Path $env:TEMP "pad-out-$label.png"
+    $ofs = [IO.File]::Open($padOut, [IO.FileMode]::Create)
+    $enc.Save($ofs); $ofs.Dispose()
+    $chk = New-Object System.Drawing.Bitmap($padOut)
+    $b1 = $chk.GetPixel($bluePts[0], $bluePts[1])
+    $w1 = $chk.GetPixel($whitePts[0], $whitePts[1])
+    $w2 = $chk.GetPixel($whitePts[2], $whitePts[3])
+    Say ("pad {0}: scale={1:N3} dest={2:N0}x{3:N0} blue@({4},{5})={6},{7},{8} white@({9},{10})={11},{12},{13} white@({14},{15})={16},{17},{18}" -f $label, $scale, $sw, $sh, $bluePts[0], $bluePts[1], $b1.R, $b1.G, $b1.B, $whitePts[0], $whitePts[1], $w1.R, $w1.G, $w1.B, $whitePts[2], $whitePts[3], $w2.R, $w2.G, $w2.B)
+    $chk.Dispose()
+}
+Make-Png (Join-Path $env:TEMP 'plan-400x800.png') 400 800 $blue
+Make-Png (Join-Path $env:TEMP 'plan-2500x800.png') 2500 800 $blue
+Test-Pad (Join-Path $env:TEMP 'plan-400x800.png') 2048 1280 'portrait' @(1024, 640) @(100, 640, 1900, 640)
+Test-Pad (Join-Path $env:TEMP 'plan-2500x800.png') 2048 1280 'wide' @(1024, 640) @(1024, 100, 1024, 1200)
 
 # ---- (2) dialog close ----
 $script:CropState = @{ result = $null; controls = @{}; imgW = 1.0; imgH = 1.0; sMin = 1.0; zoom = 1.0; offX = 0.0; offY = 0.0; vw = 1.0; vh = 1.0 }
