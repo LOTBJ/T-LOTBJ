@@ -495,6 +495,7 @@ $xaml = @'
                     <TextBlock Text="用你自己的图(即梦/截图/下载)做 DSH 背景; 玻璃材质在 DSH 设置里自行开关, 互不干扰" Foreground="#8A919E" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"/>
                     <Button x:Name="BtnWallpaperAdd" Style="{StaticResource GhostBtn}" Content="➕ 添加图片" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                     <Button x:Name="BtnWallpaperUrl" Style="{StaticResource GhostBtn}" Content="⬇️ URL 下载" FontSize="12" Margin="8,0,0,0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    <Button x:Name="BtnWallpaperReset" Style="{StaticResource GhostBtn}" Content="↩ 恢复默认(无壁纸)" FontSize="12" Margin="8,0,0,0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                   </StackPanel>
                   <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="360" Margin="0,14,0,0">
                     <WrapPanel x:Name="WallpaperGrid"/>
@@ -702,6 +703,15 @@ function Set-Wallpaper([string]$srcPath) {
     }
 }
 
+function Reset-Wallpaper {
+    try {
+        Remove-Item -LiteralPath (Join-Path $script:WallpaperStatic "current.png") -Force -ErrorAction SilentlyContinue
+        $wallpaperHint.Text = "✓ 已恢复默认(无壁纸)。刷新 DSH 网页(F5)生效。"
+    } catch {
+        $wallpaperHint.Text = "恢复失败: $($_.Exception.Message)"
+    }
+}
+
 function Update-WallpaperPanel {
     $wallpaperGrid.Children.Clear()
     New-Item -ItemType Directory -Force -Path $WallpaperDir | Out-Null
@@ -760,15 +770,17 @@ function Update-WallpaperPanel {
         $bSet.FontSize = 11
         $bSet.Style = $window.FindResource("GhostBtn")
         $bSet.Margin = [System.Windows.Thickness]::new(0, 0, 6, 0)
-        $path = $f.FullName
-        $bSet.Add_Click({ param($s, $e) Set-Wallpaper $path })
+        # 路径存 Tag: 事件处理器闭包读不到循环局部变量(老坑), 经 $s.Tag 传递
+        $bSet.Tag = $f.FullName
+        $bSet.Add_Click({ param($s, $e) Set-Wallpaper ([string]$s.Tag) })
         $bDel = [System.Windows.Controls.Button]::new()
         $bDel.Content = "🗑"
         $bDel.FontSize = 11
         $bDel.Style = $window.FindResource("GhostBtn")
+        $bDel.Tag = $f.FullName
         $bDel.Add_Click({
             param($s, $e)
-            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath ([string]$s.Tag) -Force -ErrorAction SilentlyContinue
             Update-WallpaperPanel
         })
         $btns.Children.Add($bSet) | Out-Null
@@ -1080,6 +1092,7 @@ $window.FindName("BtnEnvRefresh").Add_Click({ Update-EnvPanel })
 $window.FindName("BtnSetupGo").Add_Click({ Start-SetupDsh })
 $window.FindName("BtnWallpaperAdd").Add_Click({ Add-WallpaperFile })
 $window.FindName("BtnWallpaperUrl").Add_Click({ Add-WallpaperUrl })
+$window.FindName("BtnWallpaperReset").Add_Click({ Reset-Wallpaper })
 $window.FindName("BtnOpenSkillsDir").Add_Click({ if (Test-Path -LiteralPath $SkillsRoot) { Start-Process explorer.exe -ArgumentList "`"$SkillsRoot`"" } })
 
 # 标题栏拖拽
