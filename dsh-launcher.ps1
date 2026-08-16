@@ -64,10 +64,7 @@ $OutLog      = Join-Path $ScriptDir "dsh-web.out.log"
 $ErrLog      = Join-Path $ScriptDir "dsh-web.err.log"
 $WhaleImg    = Join-Path $ScriptDir "dsh-whale-girl-source.png"
 $PetDir      = Join-Path $ScriptDir "whale-assets"
-$PetGirl     = Join-Path $PetDir "whale-girl-transparent.png"
-$SeaBg       = Join-Path $PetDir "sea-bg.png"
 $OfficialWhale = Join-Path $PetDir "official-whale.png"
-$PetAtlas    = Join-Path $PetDir "atlas.png"
 $SessionsDir = Join-Path $DshHome "sessions"
 $SkillsRoot  = Join-Path $DshHome "skills"
 $BackupsRoot = Join-Path $DshHome "backups"
@@ -730,7 +727,6 @@ $script:pet = @{
     t       = 0
     max     = 0
     phase   = 0.0
-    gaze    = $null
     drag    = $false
     busy    = $false
     wasBusy = $false
@@ -805,11 +801,6 @@ function Get-PetMouse {
     return @{ X = $mp.X - $tl.X; Y = $mp.Y - $tl.Y }
 }
 
-function Update-PetGaze {
-    # 三视图无 16 方向注视帧; 保留函数占位(调用点兼容), 注视感由 face 转向 + 摇摆体现
-    $script:pet.gaze = $null
-}
-
 # 待机小动作(大肥鱼式): 小概率跳/转体摇摆/拉伸/心声冒泡
 function Maybe-IdleAction {
     $p = $script:pet
@@ -825,7 +816,6 @@ function Update-Pet {
     $p = $script:pet
     $p.t++
     $p.phase += 0.10
-    $p.gaze = $null
     if ($p.talkCd -gt 0) { $p.talkCd-- }
     if ($p.emojiT -gt 0) {
         $p.emojiT--
@@ -906,7 +896,6 @@ function Update-Pet {
                         if ($script:rand.Next(500) -eq 0) { $p.hopT = 8 }
                     }
                 } elseif ($p.anim -eq "idle") {
-                    Update-PetGaze
                     Maybe-IdleAction
                     # 注视只是显示层(Codex 原版 modeDeadline 到点照样走, 不冻结漫游)
                     if ($p.t -ge $p.max) {
@@ -939,12 +928,10 @@ function Update-Pet {
                     $targetSpeed = [Math]::Min(4.2, [Math]::Abs($dx) / 50.0)
                 } else {
                     if ($p.anim -ne "idle") { Set-PetAnim "idle" }
-                    Update-PetGaze
                 }
             }
             "stay" {
                 if ($p.anim -ne "idle") { Set-PetAnim "idle" }
-                Update-PetGaze
                 Maybe-IdleAction
             }
         }
@@ -1464,23 +1451,86 @@ function Invoke-PetMenu([string]$tag) {
                 Set-PetTalk "Key 记住啦，点气泡里的「🗨️ 聊天」和我说话吧~" $false $true
             }
         }
+        "say" {
+            Set-PetTalk ($script:talkLines | Get-Random) $false $true
+        }
+        "topmost" {
+            $script:petTopmost = -not $script:petTopmost
+            $petWin.Topmost = $script:petTopmost
+            if ($script:petTopmost) { Set-PetTalk "我一直飘在最上面啦~" $false $true }
+            else { Set-PetTalk "好，不抢你的视线了~" $false $true }
+        }
+        "setcity" {
+            Add-Type -AssemblyName Microsoft.VisualBasic
+            $ct = [Microsoft.VisualBasic.Interaction]::InputBox("所在城市（天气查询用）：", "设置城市", $script:petCity)
+            if ($ct) {
+                $script:petCity = $ct
+                Save-PetCfg
+                Set-PetTalk "记住啦，家在 $ct ~" $false $true
+            }
+        }
+        "weather" { Invoke-PetWeather }
+        # 喂食子菜单(大肥鱼同款 5 种食物, 各自台词)
+        "food-fish"  { Invoke-PetFeed "🐟" "小鱼干！我的最爱！" }
+        "food-cake"  { Invoke-PetFeed "🍰" "蛋糕！罪恶但快乐……" }
+        "food-candy" { Invoke-PetFeed "🍭" "棒棒糖！转圈圈～" }
+        "food-dango" { Invoke-PetFeed "🍡" "三色团子！软乎乎～" }
+        "food-gem"   { Invoke-PetFeed "💎" "钻石？！这能吃吗……咕咚。真香！" }
     }
 }
 
-# 桌宠配置: 大小 + DeepSeek Key (持久化, 关闭重开保持)
+# 喂食动作(大肥鱼式): 蹲吃+咀嚼+对应食物表情和台词
+function Invoke-PetFeed([string]$foodEmoji, [string]$line) {
+    Set-PetEmoji $foodEmoji
+    Set-PetTalk $line $false $true
+    Set-PetAnim "wait" $true
+    $script:pet.feeding = $true
+    $script:pet.feedT = 0
+}
+
+# 天气查询(大肥鱼同款 wttr.in, 后台线程)
+function Invoke-PetWeather {
+    $city = $script:petCity
+    if (-not $city) { Set-PetTalk "还没告诉我你在哪个城市哦，右键「设置城市」~" $false $true; return }
+    Set-PetTalk "我去看看天气…" $false $true
+    $th = [System.Threading.Thread]::new({
+        param($ct)
+        $reply = ""
+        try {
+            $u = "https://wttr.in/" + [Uri]::EscapeDataString($ct) + "?format=%c+%t+%w&m"
+            $r = Invoke-WebRequest -Uri $u -UseBasicParsing -TimeoutSec 8
+            $t = ($r.Content -replace '\s+', ' ').Trim()
+            if ($t) { $reply = "$ct 现在 $t" }
+            else { $reply = "天气站没回话，晚点再试~" }
+        } catch {
+            $reply = "呜…查天气的网络断啦，晚点再试~"
+        }
+        $petWin.Dispatcher.Invoke([Action[string]]{
+            param($rp)
+            Set-PetTalk $rp $false $true
+        }, $reply)
+    })
+    $th.IsBackground = $true
+    $th.Start($city)
+}
+
+# 桌宠配置: 大小 + DeepSeek Key + 城市 (持久化, 关闭重开保持)
 $script:petSize = 1.0
 $script:dsKey = ""
+$script:petCity = ""
+$script:petTopmost = $true
 try {
     if (Test-Path -LiteralPath $PetCfgFile) {
         $cfg = Get-Content -LiteralPath $PetCfgFile -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($cfg.petSize -and $cfg.petSize -ge 0.5 -and $cfg.petSize -le 1.6) { $script:petSize = [double]$cfg.petSize }
         if ($cfg.dsKey) { $script:dsKey = [string]$cfg.dsKey }
+        if ($cfg.city) { $script:petCity = [string]$cfg.city }
     }
 } catch { }
 
 function Save-PetCfg {
     try {
-        @{ petSize = $script:petSize; dsKey = $script:dsKey } | ConvertTo-Json | Set-Content -LiteralPath $PetCfgFile -Encoding UTF8
+        @{ petSize = $script:petSize; dsKey = $script:dsKey; city = $script:petCity } | ConvertTo-Json | Set-Content -LiteralPath $PetCfgFile -Encoding UTF8
     } catch { }
 }
 
@@ -1532,11 +1582,32 @@ Add-PetMenuItem "🚶 散步模式" "roam" $script:petMenu | Out-Null
 Add-PetMenuItem "🖱 跟随鼠标" "follow" $script:petMenu | Out-Null
 Add-PetMenuItem "🏠 原地待着" "stay" $script:petMenu | Out-Null
 $script:petMenu.Items.Add([System.Windows.Controls.Separator]::new()) | Out-Null
-Add-PetMenuItem "🍪 喂食" "feed" $script:petMenu | Out-Null
+# 喂食子菜单(大肥鱼同款 5 食物)
+$miFeed = [System.Windows.Controls.MenuItem]::new()
+$miFeed.Header = "🍪 喂食"
+foreach ($f in @(
+    @{ t = "🐟 小鱼干"; tag = "food-fish" },
+    @{ t = "🍰 蛋糕"; tag = "food-cake" },
+    @{ t = "🍭 棒棒糖"; tag = "food-candy" },
+    @{ t = "🍡 三色团子"; tag = "food-dango" },
+    @{ t = "💎 钻石"; tag = "food-gem" }
+)) {
+    $mi = [System.Windows.Controls.MenuItem]::new()
+    $mi.Header = $f.t
+    $mi.Tag = $f.tag
+    $mi.Add_Click({ param($s, $e) Invoke-PetMenu ([string]$s.Tag) })
+    $miFeed.Items.Add($mi) | Out-Null
+}
+$script:petMenu.Items.Add($miFeed) | Out-Null
+Add-PetMenuItem "💬 说句话" "say" $script:petMenu | Out-Null
 Add-PetMenuItem "🔍 放大一点" "bigger" $script:petMenu | Out-Null
 Add-PetMenuItem "🔎 缩小一点" "smaller" $script:petMenu | Out-Null
 $script:petMenu.Items.Add([System.Windows.Controls.Separator]::new()) | Out-Null
+Add-PetMenuItem "🌤 查看天气" "weather" $script:petMenu | Out-Null
+Add-PetMenuItem "🏙 设置城市" "setcity" $script:petMenu | Out-Null
+Add-PetMenuItem "📌 置顶开关" "topmost" $script:petMenu | Out-Null
 Add-PetMenuItem "🔑 设置 Key" "setkey" $script:petMenu | Out-Null
+$script:petMenu.Items.Add([System.Windows.Controls.Separator]::new()) | Out-Null
 Add-PetMenuItem "👋 退出" "exit" $script:petMenu | Out-Null
 $petHost.ContextMenu = $script:petMenu
 
