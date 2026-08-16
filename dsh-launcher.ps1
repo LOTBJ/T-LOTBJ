@@ -707,8 +707,9 @@ function Get-ImageNativeSize([string]$path) {
 
 # 设壁纸前先比大小/比例, 决定适配方式(用户需求: 比较后再决定剪切还是缩小):
 #   copy  = 尺寸+比例都合适 → 直接复制, 零处理
-#   scale = 比例一致但尺寸不匹配 → 自动放大(小图)或缩小(大图), 不弹窗
-#   crop  = 比例不一致 → 弹裁剪窗让用户选保留区域
+#   scale = 比例一致且图比屏幕大 → 自动缩小到屏幕尺寸, 不弹窗
+#   pad   = 小图(至少一边小于屏幕) → 白底画布铺到屏幕尺寸, 原图原生大小居中(不放大不变形), 超出的边居中裁剪
+#   crop  = 比例不一致的大图 → 弹裁剪窗让用户选保留区域
 # 注意: 别用 DecodePixelWidth 取尺寸 — 它会把小图放大到限宽值, 比大小全错(坑#34)
 function Get-WallpaperPlan([string]$srcPath) {
     $native = Get-ImageNativeSize $srcPath
@@ -727,11 +728,14 @@ function Get-WallpaperPlan([string]$srcPath) {
     $ratioDiff = [Math]::Abs($imgRatio - $targetRatio) / $targetRatio
     $isPng = ([System.IO.Path]::GetExtension($srcPath)).ToLower() -eq '.png'
     $fitSize = ($iw -le $tw * 1.05) -and ($ih -le $th * 1.05) -and ($iw -ge $tw * 0.85) -and ($ih -ge $th * 0.85)
+    $covers = ($iw -ge $tw * 0.98) -and ($ih -ge $th * 0.98)
     if ($ratioDiff -lt 0.03) {
         if ($fitSize -and $isPng) { return @{ mode = 'copy' } }
-        return @{ mode = 'scale'; up = (($iw -lt $tw) -or ($ih -lt $th)) }
+        if ($covers) { return @{ mode = 'scale'; up = $false } }
+        return @{ mode = 'pad' }
     }
-    return @{ mode = 'crop' }
+    if ($covers) { return @{ mode = 'crop' } }
+    return @{ mode = 'pad' }
 }
 
 function Set-Wallpaper([string]$srcPath) {
@@ -742,11 +746,14 @@ function Set-Wallpaper([string]$srcPath) {
         if ($plan.mode -eq 'copy') {
             Copy-Item -LiteralPath $srcPath -Destination $out -Force
         } elseif ($plan.mode -eq 'scale') {
-            # 比例一致: 不弹窗, 整图缩放(小图放大铺满, 大图缩小)
+            # 比例一致的大图: 不弹窗, 整图缩小到屏幕尺寸
             $full = [System.Windows.Rect]::new(0, 0, 1, 1)
             Render-WallpaperCrop -src $srcPath -rect $full -out $out -fullImage
+        } elseif ($plan.mode -eq 'pad') {
+            # 小图/单边偏小: 白底画布铺满屏幕, 原图原生大小居中, 超出的边居中裁剪(用户需求)
+            Render-WallpaperPad -src $srcPath -out $out
         } else {
-            # 比例不一致: 弹裁剪窗(拖拽选区域 + 滑杆/滚轮缩放)
+            # 比例不一致的大图: 弹裁剪窗(拖拽选区域 + 滑杆/滚轮缩放)
             $rect = Show-WallpaperCropDialog $srcPath
             if ($null -eq $rect) { Show-WallpaperHint "已取消, 壁纸未更改。" ; return $false }
             Render-WallpaperCrop -src $srcPath -rect $rect -out $out
@@ -755,8 +762,9 @@ function Set-Wallpaper([string]$srcPath) {
         if ($plan.mode -eq 'copy') {
             Show-WallpaperHint "✓ 尺寸比例正好匹配屏幕, 已直接应用。刷新 DSH 网页(F5)即可看到。"
         } elseif ($plan.mode -eq 'scale') {
-            if ($plan.up) { Show-WallpaperHint "✓ 原图偏小, 已放大铺满屏幕后应用。刷新 DSH 网页(F5)即可看到。" }
-            else { Show-WallpaperHint "✓ 原图偏大, 已按屏幕尺寸缩小后应用。刷新 DSH 网页(F5)即可看到。" }
+            Show-WallpaperHint "✓ 原图偏大, 已按屏幕尺寸缩小后应用。刷新 DSH 网页(F5)即可看到。"
+        } elseif ($plan.mode -eq 'pad') {
+            Show-WallpaperHint "✓ 原图偏小/比例不同: 已白底填充居中(不放大不变形)。刷新 DSH 网页(F5)即可看到。"
         } else {
             Show-WallpaperHint "✓ 壁纸已按所选区域裁剪并设为背景。刷新 DSH 网页(F5)即可看到。"
         }
@@ -795,9 +803,10 @@ function Update-WallpaperHtml([bool]$apply) {
             $text = $text.Replace('body{background:none !important;}',
                 "body{background:url(/wallpaper/current.png?t=$ts) center/cover no-repeat fixed !important;}")
         } elseif ($text.Contains('wallpaper/current.png?t=')) {
-            # 已有 url: 仅刷新时间戳(用 MatchEvaluator, 避开替换串里 $ 的坑)
-            $rx = [regex]'wallpaper/current\.png\?t=[^)]*'
-            $text = $rx.Replace($text, { param($m) "wallpaper/current.png?t=$ts" })
+            # 已有 url: 仅刷新时间戳, 且**只限定在样式块内**(桥脚本里也有同样文本,
+            # 全文替换会吃掉 JS 字符串的收尾引号 → 桥语法错误不执行 → 壁纸不显示, 坑#35)
+            $styleRx = [regex]'(?s)(<style id="dsh-wallpaper-css">.*?)wallpaper/current\.png\?t=[^)]*(.*?</style>)'
+            $text = $styleRx.Replace($text, { param($m) $m.Groups[1].Value + "wallpaper/current.png?t=$ts" + $m.Groups[2].Value })
         } else {
             # DSH 更新覆盖过 index.html: 样式块丢失, 重新插入 </head> 前
             $block = "    <style id=`"dsh-wallpaper-css`">`n" +
@@ -806,8 +815,12 @@ function Update-WallpaperHtml([bool]$apply) {
                      "    </style>`n  </head>"
             $text = $text.Replace('</head>', $block)
         }
-        # 桥接脚本缺失时补插(常量文本; DSH 更新可能单独冲掉它)
-        if (-not $text.Contains('dsh-wallpaper-bridge')) {
+        # 桥接脚本缺失或被误伤时重插: 校验两个关键片段完整性(坑#35); 空格无关正则
+        $bridgeOk = $text.Contains('dsh-wallpaper-bridge') -and
+                    [regex]::IsMatch($text, "indexOf\('wallpaper/current\.png\?t='\)") -and
+                    [regex]::IsMatch($text, "'/wallpaper/current\.png\?t='\s*\+\s*t")
+        if (-not $bridgeOk) {
+            $text = [regex]::Replace($text, '(?s)<script id="dsh-wallpaper-bridge">.*?</script>\s*', '')
             $bridge = "    <script id=`"dsh-wallpaper-bridge`">`n" +
                       "      /* 壁纸中心桥: 把启动器写入的壁纸喂给官方 Aqua 的 localStorage 槽。 */`n" +
                       "      (function(){try{var s=document.getElementById('dsh-wallpaper-css');if(!s)return;var txt=s.textContent;var k='dsh.wallpaper.center.ts';var ok='dsh.wallpaper.center.original';if(txt.indexOf('dsh-original')>=0){if(!localStorage.getItem(ok)){localStorage.setItem('dsh.ui-aqua.enabled','false');localStorage.setItem('dsh.ui-aqua.wallpaper','');localStorage.setItem('dsh.ui-aqua.background','fluid');localStorage.removeItem(k);localStorage.setItem(ok,'1');}return;}var i=txt.indexOf('wallpaper/current.png?t=');if(i<0)return;var j=txt.indexOf(')',i);var t=txt.substring(i+24,j);if(localStorage.getItem(k)===t)return;localStorage.setItem('dsh.ui-aqua.wallpaper','/wallpaper/current.png?t='+t);localStorage.setItem('dsh.ui-aqua.background','wallpaper');localStorage.setItem('dsh.ui-aqua.enabled','true');localStorage.removeItem(ok);localStorage.setItem(k,t);}catch(e){}})();`n" +
@@ -1129,6 +1142,45 @@ function Render-WallpaperCrop([string]$src, [System.Windows.Rect]$rect, [string]
     $ofs.Dispose()
 }
 
+# 白底填充(小图/单边偏小): 屏幕尺寸白画布 + 原图原生大小居中(不缩放, 保持清晰),
+# 超出屏幕的边居中裁剪(用户需求: 宽超了裁宽、长超了裁长, 短的方向上下/左右等分白底)
+function Render-WallpaperPad([string]$src, [string]$outPath) {
+    $fs = [IO.File]::OpenRead($src)
+    $bi = [System.Windows.Media.Imaging.BitmapImage]::new()
+    $bi.BeginInit()
+    $bi.StreamSource = $fs
+    $bi.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+    $bi.EndInit()
+    $fs.Dispose()
+    $bi.Freeze()
+    $iw = $bi.PixelWidth
+    $ih = $bi.PixelHeight
+    Add-Type -AssemblyName System.Windows.Forms
+    $scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $tw = [int]$scr.Width
+    $th = [int]$scr.Height
+    $sx = [Math]::Max(0, [int](($iw - $tw) / 2))
+    $sy = [Math]::Max(0, [int](($ih - $th) / 2))
+    $sw = [Math]::Min($iw, $tw)
+    $sh = [Math]::Min($ih, $th)
+    $dx = [Math]::Max(0.0, ($tw - $sw) / 2.0)
+    $dy = [Math]::Max(0.0, ($th - $sh) / 2.0)
+    $cb = [System.Windows.Media.Imaging.CroppedBitmap]::new($bi, [System.Windows.Int32Rect]::new($sx, $sy, $sw, $sh))
+    $cb.Freeze()
+    $dv = [System.Windows.Media.DrawingVisual]::new()
+    $dc = $dv.RenderOpen()
+    $dc.DrawRectangle([System.Windows.Media.Brushes]::White, $null, [System.Windows.Rect]::new(0, 0, $tw, $th))
+    $dc.DrawImage($cb, [System.Windows.Rect]::new($dx, $dy, $sw, $sh))
+    $dc.Close()
+    $rtb = [System.Windows.Media.Imaging.RenderTargetBitmap]::new($tw, $th, 96, 96, [System.Windows.Media.PixelFormats]::Pbgra32)
+    $rtb.Render($dv)
+    $enc = [System.Windows.Media.Imaging.PngBitmapEncoder]::new()
+    $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($rtb))
+    $ofs = [IO.File]::Open($outPath, [IO.FileMode]::Create)
+    $enc.Save($ofs)
+    $ofs.Dispose()
+}
+
 function Update-WallpaperPanel {
     $wallpaperGrid.Children.Clear()
     New-Item -ItemType Directory -Force -Path $WallpaperDir | Out-Null
@@ -1267,7 +1319,7 @@ function Update-WallpaperPanel {
         $card.Child = $sp
         $wallpaperGrid.Children.Add($card) | Out-Null
     }
-    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸自动比尺寸: 匹配直接应用 / 同比例自动缩放 / 比例不同弹裁剪窗选区域 · 首卡「原版 UI」一键回出厂界面 · 刷新网页生效"
+    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸自动适配: 匹配直接应用 / 大图缩小 / 小图白底填充居中 / 比例不同的大图弹裁剪窗 · 首卡「原版 UI」回出厂界面 · 刷新网页生效"
 }
 
 function Add-WallpaperFile {
