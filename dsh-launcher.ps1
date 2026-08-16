@@ -1245,14 +1245,20 @@ function Start-DshUrl {
     $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
     if (-not (Test-Path -LiteralPath $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
     $profile = Join-Path $DshHome "edge-dsh"
+    # PWA 优先: 已安装 DSH PWA 时用 app-id 启动 → 任务栏显示鲸鱼娘独立图标(不再是 Edge 图标)
+    $pwaDir = Join-Path $env:LOCALAPPDATA "Microsoft\Edge\User Data\Default\Web Applications"
+    $pwaId = ""
+    if (Test-Path -LiteralPath (Join-Path $pwaDir "_crx__hgiemfgfjhalibdoboikeiepnnjapnpc")) { $pwaId = "_crx__hgiemfgfjhalibdoboikeiepnnjapnpc" }
     try {
-        if (Test-Path -LiteralPath $edge) {
+        if ($pwaId -and (Test-Path -LiteralPath $edge)) {
+            Start-Process $edge -ArgumentList "--app-id=$pwaId"
+        } elseif (Test-Path -LiteralPath $edge) {
             Start-Process $edge -ArgumentList "--user-data-dir=`"$profile`"", "--app=$Url"
         } else {
-            Start-DshUrl
+            Start-Process $Url
         }
     } catch {
-        Start-DshUrl
+        Start-Process $Url
     }
 }
 
