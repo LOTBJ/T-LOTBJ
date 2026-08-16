@@ -360,21 +360,39 @@ class PetWindow(QWidget):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         super().__init__(None, flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setWindowTitle("大肥鱼桌宠")
-        
-        # 精灵加载
+        self.setWindowTitle("DSH 鲸鱼娘")
+
+        # 精灵加载(glob+尺寸判断: 正面255宽/侧面222宽/背面253宽, 高度187/238/306/340; 免疫文件名编码问题)
+        import glob as _glob
         self.sprites = {}
+        by_size = {}
+        icon_pix = None
+        for f in _glob.glob(os.path.join(SPRITE_DIR, "*.png")):
+            try:
+                pm = QPixmap(f)
+                if pm.isNull():
+                    continue
+                by_size[(pm.width(), pm.height())] = pm
+                if pm.width() == 48 and icon_pix is None:
+                    icon_pix = pm
+            except Exception:
+                continue
         for label, mult in SIZE_LEVELS.items():
             h = int(340 * mult)
-            for name in ["正面", "侧面", "背面"]:
-                sized = os.path.join(SPRITE_DIR, f"{name}_{h}.png")
-                if os.path.exists(sized):
-                    pix = QPixmap(sized)
-                else:
-                    pix = QPixmap(os.path.join(SPRITE_DIR, f"{name}.png")).scaledToHeight(
-                        h, Qt.TransformationMode.SmoothTransformation)
-                self.sprites[(name, h)] = pix
-        self.icon = QIcon(os.path.join(SPRITE_DIR, "icon.png"))
+            for vname, vw in [("正面", 255), ("侧面", 222), ("背面", 253)]:
+                pix = None
+                for (w, hh), pm in by_size.items():
+                    if w == vw and hh == h:
+                        pix = pm
+                        break
+                if pix is None:
+                    for (w, hh), pm in by_size.items():
+                        if w == vw and hh == 340:
+                            pix = pm.scaledToHeight(h, Qt.TransformationMode.SmoothTransformation)
+                            break
+                if pix is not None:
+                    self.sprites[(vname, h)] = pix
+        self.icon = QIcon(icon_pix) if icon_pix is not None else QIcon()
 
         self.cur_h = int(340 * self.cfg["size"])
         self.win_mx = int(self.cur_h * 0.062) + 6
