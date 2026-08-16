@@ -568,10 +568,15 @@ $script:petProc = $null
 function Start-Pet {
     try {
         if ($script:petProc -and -not $script:petProc.HasExited) { return }
-        $python = (Get-Command python -ErrorAction SilentlyContinue).Source
-        if (-not $python) { $python = (Get-Command pythonw -ErrorAction SilentlyContinue).Source }
+        # pythonw 优先(无控制台窗口); 回退 python + Hidden
+        $python = (Get-Command pythonw -ErrorAction SilentlyContinue).Source
         if ($python) {
             $script:petProc = Start-Process $python -ArgumentList ('"' + $script:PetScript + '"') -WorkingDirectory $ScriptDir -PassThru
+        } else {
+            $python = (Get-Command python -ErrorAction SilentlyContinue).Source
+            if ($python) {
+                $script:petProc = Start-Process $python -ArgumentList ('"' + $script:PetScript + '"') -WorkingDirectory $ScriptDir -WindowStyle Hidden -PassThru
+            }
         }
     } catch { }
 }

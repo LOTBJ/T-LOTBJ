@@ -55,7 +55,7 @@ CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 BUBBLE_H = 56
 MARGIN = 4
 SIZE_LEVELS = {"小": 0.55, "中": 0.7, "大": 0.9}
-SPEED = 380.0
+SPEED = 170.0
 TICK = 20
 
 LINES = [
@@ -946,51 +946,6 @@ class PetWindow(QWidget):
             pass
         return "汕头" """
 
-    def _get_weather(self):
-        try:
-            city = self.cfg.get("city", "汕头")
-            print("当前城市:", city)
-
-            url = f"https://wttr.in/{city}?format=j1"
-
-            r = requests.get(
-                url,
-                timeout=10,
-                headers={
-                    "User-Agent": "Mozilla/5.0"
-                }
-            )
-
-            print("状态:", r.status_code)
-            print(r.text[:500])
-
-            data = r.json()
-
-            weather = data["current_condition"][0]
-
-            temp = weather["temp_C"]
-
-            weather_map = {
-                "Sunny": "晴",
-                "Clear": "晴",
-                "Partly cloudy": "多云",
-                "Cloudy": "阴",
-                "Light rain": "小雨",
-                "Moderate rain": "中雨",
-                "Heavy rain": "大雨"
-            }
-
-            raw_weather = weather["weatherDesc"][0]["value"]
-
-            desc = weather_map.get(raw_weather, raw_weather)
-
-            self.say(f"{city}今天{temp}°，天气{desc}")
-
-        except Exception as e:
-            print("天气错误:", repr(e))
-            self.say("天气获取失败")
-    
-
     def _build_menu(self):
         m = QMenu(self)
         mode_menu = m.addMenu("模式")
@@ -1006,7 +961,6 @@ class PetWindow(QWidget):
             a.setChecked(abs(self.cur_h - 340 * mult) < 2)
             a.triggered.connect(lambda _, v=mult: self.set_size(v))
         m.addAction("设置 Key", self._set_key_dialog)
-        m.addAction("查看天气", self._get_weather)
         m.addSeparator()
         m.addAction("显示/隐藏", self.toggle_visible)
         m.addAction("回到屏幕内", self.snap_into_screen)
@@ -1070,6 +1024,12 @@ class PetWindow(QWidget):
         self.win_w = max(p.width() for k, p in self.sprites.items() if k[1] == self.cur_h) + self.win_mx * 2
         self.setFixedSize(self.win_w, self.cur_h + BUBBLE_H + MARGIN * 2 + 10)
         self.snap_into_screen()
+        # 大小立即持久化(修复: 重启后大小丢失)
+        try:
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(self.cfg, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
 
     def snap_into_screen(self):
         geo = (self.screen() or QApplication.primaryScreen()).availableGeometry()
