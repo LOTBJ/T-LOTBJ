@@ -1245,13 +1245,16 @@ function Start-DshUrl {
     $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
     if (-not (Test-Path -LiteralPath $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
     $profile = Join-Path $DshHome "edge-dsh"
-    # PWA 优先: 已安装 DSH PWA 时用 app-id 启动 → 任务栏显示鲸鱼娘独立图标(不再是 Edge 图标)
-    $pwaDir = Join-Path $env:LOCALAPPDATA "Microsoft\Edge\User Data\Default\Web Applications"
-    $pwaId = ""
-    if (Test-Path -LiteralPath (Join-Path $pwaDir "_crx__hgiemfgfjhalibdoboikeiepnnjapnpc")) { $pwaId = "_crx__hgiemfgfjhalibdoboikeiepnnjapnpc" }
+    # PWA 优先: 已安装 DSH PWA 时经 shell:AppsFolder 启动 → 任务栏鲸鱼娘独立图标
+    # (注意: 目录名与 AppID 后缀不一致, 必须用 Get-StartApps 查, 不能手写 app-id)
+    $appId = ""
     try {
-        if ($pwaId -and (Test-Path -LiteralPath $edge)) {
-            Start-Process $edge -ArgumentList "--app-id=$pwaId"
+        $app = Get-StartApps | Where-Object { $_.Name -eq "DeepSeek Harness" } | Select-Object -First 1
+        if ($app) { $appId = $app.AppID }
+    } catch { }
+    try {
+        if ($appId) {
+            Start-Process "shell:AppsFolder\$appId"
         } elseif (Test-Path -LiteralPath $edge) {
             Start-Process $edge -ArgumentList "--user-data-dir=`"$profile`"", "--app=$Url"
         } else {
