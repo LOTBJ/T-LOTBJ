@@ -386,21 +386,11 @@ $xaml = @'
       <!-- ============================ 极简视图 (官方浅色) ============================ -->
       <!-- ============ 极简视图 · 官网语言 v2 ============ -->
       <Grid x:Name="ViewMinimal" Background="#F9F8F8" Visibility="Visible">
-        <!-- 官网同款"纱布撒蓝": 顶部淡蓝晕染渐隐(加强版: 颜色更浓延伸更远) -->
-        <Border Height="340" VerticalAlignment="Top" IsHitTestVisible="False">
+        <!-- 官网同款"纱布撒蓝": 顶部淡蓝晕染渐隐 -->
+        <Border Height="280" VerticalAlignment="Top" IsHitTestVisible="False">
           <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-              <GradientStop Color="#A8CCF0" Offset="0"/>
-              <GradientStop Color="#4DF0F7FF" Offset="0.6"/>
-              <GradientStop Color="#00FAFAFA" Offset="1"/>
-            </LinearGradientBrush>
-          </Border.Background>
-        </Border>
-        <!-- 底部淡蓝氛围光(借鉴 DSH-Transparent-UI-Plugin) -->
-        <Border Height="300" VerticalAlignment="Bottom" IsHitTestVisible="False">
-          <Border.Background>
-            <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
-              <GradientStop Color="#5C9CC1E7" Offset="0"/>
+              <GradientStop Color="#9CC1E7" Offset="0"/>
               <GradientStop Color="#00FAFAFA" Offset="1"/>
             </LinearGradientBrush>
           </Border.Background>
@@ -454,56 +444,47 @@ $xaml = @'
             <!-- 环境面板 -->
             <StackPanel x:Name="PanelEnv" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
               <Border CornerRadius="20" Background="#8CFFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="560">
-                <Grid>
-                  <Border Height="1" Background="#E6FFFFFF" VerticalAlignment="Top" HorizontalAlignment="Stretch" Margin="1,0"/>
-                  <StackPanel>
-                    <StackPanel Orientation="Horizontal">
-                      <TextBlock Text="环 境 信 息" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
-                      <TextBlock Text="本机 DSH 部署与运行状况" Foreground="#8A919E" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"/>
-                      <Button x:Name="BtnEnvRefresh" Style="{StaticResource GhostBtn}" Content="↻ 刷新" FontSize="12" HorizontalAlignment="Right"/>
-                    </StackPanel>
-                    <StackPanel x:Name="EnvRows" Margin="0,12,0,0"/>
+                <StackPanel>
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="环 境 信 息" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
+                    <TextBlock Text="本机 DSH 部署与运行状况" Foreground="#8A919E" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                    <Button x:Name="BtnEnvRefresh" Style="{StaticResource GhostBtn}" Content="↻ 刷新" FontSize="12" HorizontalAlignment="Right"/>
                   </StackPanel>
-                </Grid>
+                  <StackPanel x:Name="EnvRows" Margin="0,12,0,0"/>
+                </StackPanel>
               </Border>
             </StackPanel>
 
             <!-- 技能面板 -->
             <StackPanel x:Name="PanelSkills" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
               <Border CornerRadius="20" Background="#8CFFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="600">
-                <Grid>
-                  <Border Height="1" Background="#E6FFFFFF" VerticalAlignment="Top" HorizontalAlignment="Stretch" Margin="1,0"/>
-                  <StackPanel>
-                    <StackPanel Orientation="Horizontal">
-                      <TextBlock Text="技 能 库" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
-                      <TextBlock x:Name="SkillCountText" Text="" Foreground="#8A919E" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center"/>
-                      <Button x:Name="BtnOpenSkillsDir" Style="{StaticResource GhostBtn}" Content="打开技能目录" FontSize="12" HorizontalAlignment="Right"/>
-                    </StackPanel>
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="340" Margin="0,12,0,0">
-                      <StackPanel x:Name="SkillCards"/>
-                    </ScrollViewer>
+                <StackPanel>
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="技 能 库" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="SkillCountText" Text="" Foreground="#8A919E" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                    <Button x:Name="BtnOpenSkillsDir" Style="{StaticResource GhostBtn}" Content="打开技能目录" FontSize="12" HorizontalAlignment="Right"/>
                   </StackPanel>
-                </Grid>
+                  <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="340" Margin="0,12,0,0">
+                    <StackPanel x:Name="SkillCards"/>
+                  </ScrollViewer>
+                </StackPanel>
               </Border>
             </StackPanel>
 
             <!-- 环境装配面板 (一键下载安装 DSH 运行环境, 借鉴大肥鱼"别人一键装配"思路) -->
             <StackPanel x:Name="PanelSetup" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center">
               <Border CornerRadius="20" Background="#8CFFFFFF" BorderBrush="#B3FFFFFF" BorderThickness="1" Padding="28,26" Width="580">
-                <Grid>
-                  <Border Height="1" Background="#E6FFFFFF" VerticalAlignment="Top" HorizontalAlignment="Stretch" Margin="1,0"/>
-                  <StackPanel>
-                    <TextBlock Text="环 境 装 配" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
-                    <TextBlock Text="新机器一键装配 DSH 运行环境：检测 node/npm → 自动下载安装 dsh → 生成配置，开箱即用。" Foreground="#8A919E" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
-                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-                      <TextBlock x:Name="SetupState" Text="检测中…" Foreground="#1E232C" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                      <Button x:Name="BtnSetupGo" Style="{StaticResource PrimaryBtn}" Content="🔧 一键装配" Height="44" Background="#4D6BFE" Padding="26,0" HorizontalAlignment="Right"/>
-                    </StackPanel>
-                    <Border CornerRadius="12" Background="#26FFFFFF" BorderBrush="#55FFFFFF" BorderThickness="1" Padding="12,10" Margin="0,14,0,0">
-                      <TextBlock x:Name="SetupLogBox" Text="" Foreground="#5B6472" FontSize="11.5" FontFamily="Consolas" TextWrapping="Wrap" MaxHeight="160"/>
-                    </Border>
+                <StackPanel>
+                  <TextBlock Text="环 境 装 配" Foreground="#152443" FontSize="16" FontWeight="SemiBold"/>
+                  <TextBlock Text="新机器一键装配 DSH 运行环境：检测 node/npm → 自动下载安装 dsh → 生成配置，开箱即用。" Foreground="#8A919E" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                  <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                    <TextBlock x:Name="SetupState" Text="检测中…" Foreground="#1E232C" FontSize="13.5" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    <Button x:Name="BtnSetupGo" Style="{StaticResource PrimaryBtn}" Content="🔧 一键装配" Height="44" Background="#4D6BFE" Padding="26,0" HorizontalAlignment="Right"/>
                   </StackPanel>
-                </Grid>
+                  <Border CornerRadius="12" Background="#26FFFFFF" BorderBrush="#55FFFFFF" BorderThickness="1" Padding="12,10" Margin="0,14,0,0">
+                    <TextBlock x:Name="SetupLogBox" Text="" Foreground="#5B6472" FontSize="11.5" FontFamily="Consolas" TextWrapping="Wrap" MaxHeight="160"/>
+                  </Border>
+                </StackPanel>
               </Border>
             </StackPanel>
           </Grid>
@@ -742,6 +723,28 @@ try {
     Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("ATLAS-ERR: " + $_.Exception.Message)
 }
 
+# 情绪动作图集(4x4=16帧 192x208/格, 与主图集同规格): excited 兴奋 / curious 好奇
+foreach ($emoName in @("excited", "curious")) {
+    try {
+        $emoPath = Join-Path $PetDir "$emoName-atlas.png"
+        if (Test-Path -LiteralPath $emoPath) {
+            $emoAtlas = New-Bitmap $emoPath
+            $emoAtlas.Freeze()
+            for ($i = 0; $i -lt 16; $i++) {
+                $cb2 = [System.Windows.Media.Imaging.CroppedBitmap]::new()
+                $cb2.BeginInit()
+                $cb2.Source = $emoAtlas
+                $cb2.SourceRect = [System.Windows.Int32Rect]::new(($i % 4) * $script:cellW, [int][Math]::Floor($i / 4) * $script:cellH, $script:cellW, $script:cellH)
+                $cb2.EndInit()
+                $cb2.Freeze()
+                $script:frames["$emoName,$i"] = $cb2
+            }
+        }
+    } catch {
+        Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("EMO-ERR " + $emoName + ": " + $_.Exception.Message)
+    }
+}
+
 # 动画表: 帧序列 + 每帧时长(ms) — 同标准播放器
 $script:anims = @{
     idle   = @{ Row = 0; F = @(0,1,2,3,4,5,6);   D = @(280,110,110,140,140,320,320) }
@@ -753,6 +756,9 @@ $script:anims = @{
     wait   = @{ Row = 6; F = @(0,1,2,3,4,5);     D = @(150,150,150,150,150,260) }
     think  = @{ Row = 7; F = @(0,1,2,3,4,5);     D = @(120,120,120,120,120,220) }
     review = @{ Row = 8; F = @(0,1,2,3,4,5);     D = @(150,150,150,150,150,280) }
+    # 情绪动作(独立图集): 16 帧循环
+    excited = @{ Row = -1; Custom = "excited"; F = @(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15); D = @(80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80) }
+    curious = @{ Row = -1; Custom = "curious"; F = @(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15); D = @(100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100) }
 }
 
 $script:sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -784,6 +790,8 @@ $script:pet = @{
     action  = $null
     actionT = 0.0
     chatting = $false
+    sleeping = $false
+    sleepT   = 0
 }
 $script:petScale = [System.Windows.Media.ScaleTransform]::new(1, 1)
 $script:petRotate = [System.Windows.Media.RotateTransform]::new(0)
@@ -798,9 +806,11 @@ $petImage.Stretch = [System.Windows.Media.Stretch]::Fill
 $script:heroTT = [System.Windows.Media.TranslateTransform]::new(0, 0)
 $window.FindName("HeroWhale").RenderTransform = $script:heroTT
 
-function Set-PetFrame([int]$row, [int]$col) {
+function Set-PetFrame([int]$row, [int]$col, [string]$custom = "") {
     if (-not $script:petHasAtlas) { return }
-    $src = $script:frames["$row,$col"]
+    $src = $null
+    if ($custom) { $src = $script:frames["$custom,$col"] }
+    else { $src = $script:frames["$row,$col"] }
     if ($src) { $petImage.Source = $src }
 }
 
@@ -811,7 +821,7 @@ function Set-PetAnim([string]$name, [bool]$loop = $true) {
     $script:pet.aIdx = 0
     $script:pet.aLoop = $loop
     $script:pet.aNext = $script:sw.ElapsedMilliseconds + $a.D[0]
-    Set-PetFrame $a.Row $a.F[0]
+    Set-PetFrame $a.Row $a.F[0] $a.Custom
 }
 
 function Set-PetEmoji([string]$e) {
@@ -871,15 +881,31 @@ function Update-Pet {
         $p.emojiT--
         if ($p.emojiT -eq 0) { Set-PetEmoji "" }
     }
-    # 进食状态: 蹲吃 4.5 秒后回待机
+    # 进食状态: 蹲吃 4.5 秒后回待机(吃完好奇地看看)
     if ($p.feeding) {
         $p.feedT++
         if ($p.feedT -gt 45) {
             $p.feeding = $false
-            Set-PetAnim "idle"
+            Set-PetAnim "curious" $false
             $p.t = 0
             $p.max = 40 + $script:rand.Next(40)
         }
+    }
+    # 睡觉: 完全闲置 5 分钟(3000 tick) → 蹲睡+💤; 任何交互自动唤醒
+    if ($p.anim -eq "idle" -and -not $p.busy -and -not $p.chatting -and $null -eq $p.targetX -and -not $p.drag) {
+        $p.sleepT++
+        if ($p.sleepT -ge 3000) {
+            $p.sleeping = $true
+            Set-PetAnim "wait" $true
+            Set-PetEmoji "💤"
+        }
+    } elseif ($p.sleeping) {
+        $p.sleeping = $false
+        $p.sleepT = 0
+        Set-PetAnim "idle"
+        Set-PetEmoji ""
+    } else {
+        $p.sleepT = 0
     }
 
     # 帧推进 (注视时冻结动作帧; 拖动中也不切帧——layered 窗口移动时动画重绘会产生残影重影)
@@ -899,7 +925,7 @@ function Update-Pet {
                     }
                 }
                 $p.aNext = $script:sw.ElapsedMilliseconds + $a.D[$p.aIdx]
-                Set-PetFrame $a.Row $a.F[$p.aIdx]
+                Set-PetFrame $a.Row $a.F[$p.aIdx] $a.Custom
             }
         }
     }
@@ -1763,7 +1789,7 @@ function Update-PetBusy {
             $sec = ([DateTime]::Now - $p.busyAt).TotalSeconds
             $p.busyAt = $null
             if ($sec -gt 20) {
-                Set-PetAnim "jump" $false
+                Set-PetAnim "excited" $false
                 Set-PetEmoji "🎉"
                 Set-PetTalk "忙完啦！任务完成，辛苦啦~"
             }
