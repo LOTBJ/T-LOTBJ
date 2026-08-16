@@ -1,13 +1,13 @@
 ﻿# ============================================================================
-# DeepSeek Harness 启动器 (WPF 官网风格控制台 + 独立透明桌宠)
+# DeepSeek Harness 启动器 (WPF 官网风格控制台 · 主体)
+# 桌宠: 依附的 bigfish 鲸鱼娘(dsh-whale-pet.py, PySide6), 启动器拉起/退出
 # 用法: powershell -NoProfile -ExecutionPolicy Bypass -File dsh-launcher.ps1
 #       可选参数: -HideConsole  启动后隐藏控制台窗口(桌面快捷键使用)
-#                -AutoTest     自动测试: 1.5秒模拟点击鲸鱼, 6秒后自动关闭
-# 功能: 打开 / 重启 / 环境状态 / 技能库 / 日志 / 备份目录
-#       桌宠: 独立透明置顶窗口(可拖到桌面任意位置) · 拖拽移动/双击跳/右键菜单
-#             三模式(散步/跟随鼠标/待着) · 气泡跟随+可变 · DSH 会话联动
-# 素材署名: dsh-whale-girl-source.png 与 whale-assets/*.png 来自
-#           fornarwhal/deepseek-whale-girl-icon (CC BY-NC-SA 4.0, 非商用, 署名)
+#                -AutoTest     自动测试: 验证防崩防火墙后自动关闭
+# 功能: 打开 / 一键重启 / 环境状态 / 技能库 / 装配 / 日志 / 备份目录
+#       桌宠开关: 拉起/关闭 python 桌宠进程(顶栏 🐳 按钮 / 托盘菜单)
+# 桌宠素材与代码: dafeiyu-pet (MIT) + fornarwhal/deepseek-whale-girl-icon
+#                 (CC BY-NC-SA 4.0, 非商用, 署名)
 # ============================================================================
 param([string]$Theme = "minimal", [switch]$HideConsole, [switch]$AutoTest, [switch]$Diag, [switch]$NoBusy)
 
@@ -503,87 +503,10 @@ $xaml = @'
 </Window>
 '@
 
-# ------------------------------------------------------------ 桌宠窗口(独立透明置顶, 借鉴大肥鱼/Desktop-Pet) ----
-$petXaml = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="DSH 桌宠" Width="360" Height="430"
-        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-        Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
-        WindowStartupLocation="Manual" Left="920" Top="380">
-  <Window.Resources>
-    <Style x:Key="MiniChip" TargetType="Button">
-      <Setter Property="Foreground" Value="#3F6FE0"/>
-      <Setter Property="FontFamily" Value="Microsoft YaHei UI"/>
-      <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="BorderThickness" Value="0"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="100" Background="#EDF3FF" Padding="13,6">
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="bd" Property="Background" Value="#D9E6FF"/>
-              </Trigger>
-              <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="bd" Property="Background" Value="#C7DAFF"/>
-              </Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-  </Window.Resources>
-  <!-- 隐形底(alpha=1): 分层窗口透明像素会鼠标穿透, 加近乎全透明的底让全窗口可点击 -->
-  <Canvas x:Name="PetStage" Background="#01000000">
-    <Grid x:Name="PetHost" Width="300" Height="330" RenderTransformOrigin="0.5,0.95" Cursor="SizeAll">
-      <Image x:Name="PetImage" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Bottom"/>
-    </Grid>
-    <TextBlock x:Name="PetEmoji" FontFamily="Segoe UI Emoji" FontSize="26" Foreground="#1F2A44" Panel.ZIndex="2"/>
-    <StackPanel x:Name="BubbleRoot" Panel.ZIndex="5" Width="320" Opacity="0">
-      <Border x:Name="SpeechBubble" CornerRadius="14" Background="#FFFFFF" BorderBrush="#7AA8F0" BorderThickness="2" Padding="14,11" HorizontalAlignment="Center" MaxWidth="300">
-        <Border.Effect>
-          <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.22" Color="#1F2A44"/>
-        </Border.Effect>
-        <StackPanel>
-          <TextBlock x:Name="SpeechText" Text="你好呀，我是 DSH 的小鲸鱼助手~" Foreground="#1F2A44" FontSize="13.5" FontWeight="SemiBold" TextWrapping="Wrap" LineHeight="22"/>
-          <WrapPanel x:Name="SpeechChips" Margin="0,10,0,0" Visibility="Collapsed">
-            <Button x:Name="ChipOpen" Style="{StaticResource MiniChip}" Content="▶ 打开" FontSize="12" Margin="0,0,6,6"/>
-            <Button x:Name="ChipRestart" Style="{StaticResource MiniChip}" Content="↻ 重启" FontSize="12" Margin="0,0,6,6"/>
-            <Button x:Name="ChipEnv" Style="{StaticResource MiniChip}" Content="◎ 环境" FontSize="12" Margin="0,0,6,6"/>
-            <Button x:Name="ChipSkills" Style="{StaticResource MiniChip}" Content="▤ 技能库" FontSize="12" Margin="0,0,6,6"/>
-            <Button x:Name="ChipChat" Style="{StaticResource MiniChip}" Content="🗨️ 聊天" FontSize="12" Margin="0,0,6,6"/>
-            <Button x:Name="ChipPet" Style="{StaticResource MiniChip}" Content="✋ 摸一摸" FontSize="12" Margin="0,0,6,6"/>
-            <Button x:Name="ChipTalk" Style="{StaticResource MiniChip}" Content="💬 说说话" FontSize="12" Margin="0,0,6,6"/>
-          </WrapPanel>
-        </StackPanel>
-      </Border>
-      <Polygon x:Name="BubbleTail" Points="0,0 16,0 8,10" Fill="White" HorizontalAlignment="Center" Margin="0,-3,0,0"/>
-    </StackPanel>
-  </Canvas>
-</Window>
-'@
-
 # ------------------------------------------------------------ 加载窗口 ----
 $xml = [xml]$xaml
 $reader = [System.Xml.XmlNodeReader]::new($xml)
 $window = [System.Windows.Markup.XamlReader]::Load($reader)
-
-# 桌宠独立窗口
-$petWinXml = [xml]$petXaml
-$petWinReader = [System.Xml.XmlNodeReader]::new($petWinXml)
-$petWin = [System.Windows.Markup.XamlReader]::Load($petWinReader)
-$petWin.ShowInTaskbar = $false
-$petWin.Topmost = $true
-$petWin.Dispatcher.Add_UnhandledException({
-    param($s, $e)
-    try {
-        Add-Content -Path "$env:TEMP\dsh-launcher-errors.log" -Value ("PET-ERR " + [DateTime]::Now.ToString("yyyy-MM-dd HH:mm:ss") + ": " + $e.Exception.Message)
-    } catch { }
-    $e.Handled = $true
-})
 
 # 防火墙 L6: 事件处理器内任何异常不再崩掉整个进程(此前"用着用着窗口消失"的根因)
 # 捕获后写日志 + Handled=true, 窗口继续存活
@@ -619,16 +542,6 @@ $skillCountText = $window.FindName("SkillCountText")
 $setupState = $window.FindName("SetupState")
 $setupLogBox = $window.FindName("SetupLogBox")
 
-# 桌宠窗口元素
-$speechText = $petWin.FindName("SpeechText")
-$speechChips = $petWin.FindName("SpeechChips")
-$speechBubble = $petWin.FindName("SpeechBubble")
-$bubbleRoot = $petWin.FindName("BubbleRoot")
-$petStage = $petWin.FindName("PetStage")
-$petHost  = $petWin.FindName("PetHost")
-$petImage = $petWin.FindName("PetImage")
-$petEmoji = $petWin.FindName("PetEmoji")
-
 $panels = @{
     home    = $window.FindName("PanelHome")
     env     = $window.FindName("PanelEnv")
@@ -645,389 +558,32 @@ $navBtns = @{
 # ------------------------------------------------------------ 全局状态 ----
 $script:currentPanel = "home"
 $script:busy         = $false
-$script:lastIdleAt   = [DateTime]::Now
-$script:rand         = [System.Random]::new()
-$script:sysTick      = 0
 $script:setupRunning = $false
 $script:skillsCache  = $null
 $script:skillsCacheAt = [DateTime]::MinValue
-$script:gpuQuerying = $false
 
-# 鲸鱼台词池
-$script:idleLines = @(
-    "在海的深处，我也在陪着你写报告哦~",
-    "今天的 DeepSeek 也运行得好好的呢！",
-    "需要我帮你重启服务吗？点我就好~",
-    "嘘…我在听海的声音，也在听你敲键盘的声音。",
-    "技能库里又多了新朋友，记得去看看~",
-    "如果页面打不开，可能是端口被占用了，点我重启一下？"
-)
-$script:petLines = @(
-    "呜哇！摸头会害羞的啦…(*/ω＼*)",
-    "嘿嘿，尾巴摇起来了~ 今天也一起加油！",
-    "再摸的话，我可要沉进海里了哦~",
-    "咕噜咕噜…（舒服地眯起眼睛）",
-    "好啦好啦，摸完了就快去做正事吧！"
-)
-$script:talkLines = @(
-    "我是 DeepSeek Harness 的看门小鲸鱼，负责 3080 端口的安全~",
-    "极简界面负责干活，我负责可爱，分工明确！",
-    "你知道端口残留吗？重启键就是专门治它的~",
-    "要我陪你聊聊天，还是去检查一下环境？"
-)
-$script:thinkLines = @(
-    "主人正在认真工作呢，我安静陪着~",
-    "嗯…这步有点复杂，主人加油！",
-    "我在海里也帮你盯着日志哦~",
-    "需要重启服务的话，点我一下~",
-    "咕噜咕噜…（在陪你想问题）"
-)
-$script:innerLines = @(
-    "主人在敲键盘，键盘它好可怜",
-    "深海里的鲸鱼也要写代码吗",
-    "这行报错我昨晚梦到过",
-    "再吃点小鱼干就有灵感了",
-    "主人的咖啡凉了都不知道",
-    "悄悄记下来，回头写进踩坑日志",
-    "端口 3080 今天也很安静呢",
-    "我好像把气泡压到主人桌面图标了"
-)
-
-# ------------------------------------------------------------ 桌宠引擎(大肥鱼式三视图) ----
-# 形象: 官方鲸鱼娘三视图(正面/侧面/背面, 白底已抠透明) + 程序动画(呼吸/摇摆/弹跳/咀嚼/拉伸)
-# 借鉴 大肥鱼桌宠(1190fasheqi/dafeiyu-pet, MIT): 左右走=侧面+镜像, 其余=正面+程序动作
-Add-Type -AssemblyName System.Windows.Forms
-
-$script:ViewDir = Join-Path $PetDir "views"
-$script:views = @{}
-foreach ($vn in @("front", "side", "back")) {
+# ------------------------------------------------------------ 桌宠进程管理(依附 bigfish Python 桌宠) ----
+$script:PetScript = Join-Path $ScriptDir "dsh-whale-pet.py"
+$script:petProc = $null
+function Start-Pet {
     try {
-        $vp = Join-Path $script:ViewDir "$vn.png"
-        if (Test-Path -LiteralPath $vp) {
-            $vb = New-Bitmap $vp
-            $vb.Freeze()
-            $script:views[$vn] = $vb
+        if ($script:petProc -and -not $script:petProc.HasExited) { return }
+        $python = (Get-Command python -ErrorAction SilentlyContinue).Source
+        if (-not $python) { $python = (Get-Command pythonw -ErrorAction SilentlyContinue).Source }
+        if ($python) {
+            $script:petProc = Start-Process $python -ArgumentList ('"' + $script:PetScript + '"') -WorkingDirectory $ScriptDir -PassThru
         }
-    } catch {
-        Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("VIEW-ERR " + $vn + ": " + $_.Exception.Message)
-    }
+    } catch { }
+}
+function Stop-Pet {
+    try {
+        if ($script:petProc -and -not $script:petProc.HasExited) { $script:petProc.Kill() }
+    } catch { }
+}
+function Get-PetAlive {
+    return ($script:petProc -and -not $script:petProc.HasExited)
 }
 
-$script:sw = [System.Diagnostics.Stopwatch]::StartNew()
-$script:pet = @{
-    mode    = "roam"      # roam 散步 | follow 跟随鼠标 | stay 原地待着
-    anim    = "idle"
-    aIdx    = 0
-    aNext   = 0
-    aLoop   = $true
-    x       = 30.0
-    y       = 96.0
-    dir     = 1
-    speed   = 0.0
-    t       = 0
-    max     = 0
-    phase   = 0.0
-    drag    = $false
-    busy    = $false
-    wasBusy = $false
-    busyAt  = $null
-    talkCd  = 0
-    fade    = 1.0
-    emoji   = ""
-    feeding = $false
-    feedT   = 0
-    targetX = $null
-    hopT    = 0
-    action  = $null
-    actionT = 0.0
-    chatting = $false
-    sleeping = $false
-    sleepT   = 0
-    view    = "front"   # 三视图: front/side/back
-    face    = 1         # 侧面镜像: 1=右 -1=左
-    jumpT   = 0.0       # 程序跳跃进度
-}
-$script:petScale = [System.Windows.Media.ScaleTransform]::new(1, 1)
-$script:petRotate = [System.Windows.Media.RotateTransform]::new(0)
-$petGroup = [System.Windows.Media.TransformGroup]::new()
-$petGroup.Children.Add($script:petRotate) | Out-Null
-$petGroup.Children.Add($script:petScale) | Out-Null
-$petHost.RenderTransform = $petGroup
-$petHost.RenderTransformOrigin = [System.Windows.Point]::new(0.5, 0.95)
-$petImage.Width = 240
-$petImage.Height = 320
-$petImage.Stretch = [System.Windows.Media.Stretch]::Uniform
-$script:heroTT = [System.Windows.Media.TranslateTransform]::new(0, 0)
-$window.FindName("HeroWhale").RenderTransform = $script:heroTT
-
-$script:lastViewKey = ""
-function Set-PetView([string]$v) {
-    if ($v -eq $script:lastViewKey) { return }
-    $src = $script:views[$v]
-    if ($src) {
-        $script:lastViewKey = $v
-        $petImage.Source = $src
-    }
-}
-
-# 动作 → 视图切换(大肥鱼式): 左右走=侧面+镜像, 其余=正面; 动作感靠程序动画(摇摆/弹跳/表情)
-function Set-PetAnim([string]$name, [bool]$loop = $true) {
-    $p = $script:pet
-    $p.anim = $name
-    switch ($name) {
-        "right" { Set-PetView "side"; $p.face = 1 }
-        "left"  { Set-PetView "side"; $p.face = -1 }
-        default { Set-PetView "front"; $p.face = 1 }
-    }
-}
-
-function Set-PetEmoji([string]$e) {
-    $script:pet.emoji = $e
-    $script:pet.emojiT = if ($e) { 30 } else { 0 }
-    $petEmoji.Text = $e
-    if ($e) { $petEmoji.Visibility = [System.Windows.Visibility]::Visible }
-    else { $petEmoji.Visibility = [System.Windows.Visibility]::Collapsed }
-}
-
-function Set-PetTalk([string]$text, [bool]$showChips = $false, [bool]$force = $false) {
-    if (-not $force -and $script:pet.talkCd -gt 0) { return }
-    Set-Speech $text $showChips
-    $script:pet.talkCd = 40
-}
-
-function Get-PetMouse {
-    $mp = [System.Windows.Forms.Cursor]::Position
-    $tl = $PetStage.PointToScreen([System.Windows.Point]::new(0, 0))
-    return @{ X = $mp.X - $tl.X; Y = $mp.Y - $tl.Y }
-}
-
-# 待机小动作(大肥鱼式): 小概率跳/转体摇摆/拉伸/心声冒泡
-function Maybe-IdleAction {
-    $p = $script:pet
-    if ($script:rand.Next(100) -ne 0) { return }
-    $pick = $script:rand.Next(100)
-    if ($pick -lt 35) { $p.hopT = 8 }
-    elseif ($pick -lt 60) { $p.action = "sway"; $p.actionT = 1.0 }
-    elseif ($pick -lt 80) { $p.action = "stretch"; $p.actionT = 1.0 }
-    elseif ($pick -lt 95) { Set-Speech "（" + ($script:innerLines | Get-Random) + "）" $false 2600 $true }
-}
-
-function Update-Pet {
-    $p = $script:pet
-    $p.t++
-    $p.phase += 0.10
-    if ($p.talkCd -gt 0) { $p.talkCd-- }
-    if ($p.emojiT -gt 0) {
-        $p.emojiT--
-        if ($p.emojiT -eq 0) { Set-PetEmoji "" }
-    }
-    # 进食状态: 蹲吃 4.5 秒后回待机(吃完好奇地看看)
-    if ($p.feeding) {
-        $p.feedT++
-        if ($p.feedT -gt 45) {
-            $p.feeding = $false
-            Set-PetAnim "curious" $false
-            $p.t = 0
-            $p.max = 40 + $script:rand.Next(40)
-        }
-    }
-    # 睡觉: 完全闲置 5 分钟(3000 tick) → 蹲睡+💤; 任何交互自动唤醒
-    if ($p.anim -eq "idle" -and -not $p.busy -and -not $p.chatting -and $null -eq $p.targetX -and -not $p.drag) {
-        $p.sleepT++
-        if ($p.sleepT -ge 3000) {
-            $p.sleeping = $true
-            Set-PetAnim "wait" $true
-            Set-PetEmoji "💤"
-        }
-    } elseif ($p.sleeping) {
-        $p.sleeping = $false
-        $p.sleepT = 0
-        Set-PetAnim "idle"
-        Set-PetEmoji ""
-    } else {
-        $p.sleepT = 0
-    }
-
-    # 三视图无帧推进: 动作感全部来自下面的程序动画(呼吸/摇摆/弹跳/咀嚼/拉伸/跳跃)
-    $breath = 1 + 0.012 * [Math]::Sin($p.phase)
-    $targetSpeed = 0.0
-
-    if ($p.chatting) {
-        # AI 聊天中: 思考动画, 不走路不打扰
-        if ($p.anim -ne "think" -and $p.anim -ne "wave" -and $p.anim -ne "jump") { Set-PetAnim "think" $true }
-    } elseif ($p.busy) {
-        # DSH 任务进行中 → 思考踱步: think/review 为主, 偶尔走两步(真移动); 交互动画优先
-        if ($p.anim -ne "think" -and $p.anim -ne "review" -and $p.anim -ne "wave" -and $p.anim -ne "jump" -and $p.anim -ne "right" -and $p.anim -ne "left") {
-            if ($script:rand.Next(2) -eq 0) { Set-PetAnim "think" } else { Set-PetAnim "review" }
-        }
-        if ($p.anim -eq "right" -or $p.anim -eq "left") {
-            $targetSpeed = 2.0
-            $p.walkT--
-            if ($p.walkT -le 0) { Set-PetAnim "think"; $p.t = 0; $p.max = 50 + $script:rand.Next(60) }
-        } elseif ($p.t -ge $p.max) {
-            $p.t = 0
-            $p.max = 50 + $script:rand.Next(60)
-            if ($script:rand.Next(3) -eq 0) {
-                $p.dir = if ($script:rand.Next(2) -eq 0) { 1 } else { -1 }
-                if ($p.dir -eq 1) { Set-PetAnim "right" } else { Set-PetAnim "left" }
-                $p.walkT = 15 + $script:rand.Next(15)
-            }
-        }
-    } elseif ($p.drag) {
-        $targetSpeed = 0.0
-        $p.speed = 0.0   # 清掉走路惯性, 否则拖动时窗口被惯性+手动双重移动
-    } else {
-        switch ($p.mode) {
-            "roam" {
-                # 目标点制漫游(大肥鱼式, 低频版): 随机屏幕目标 → 走到 → 休息 12-24 秒(40% 概率续歇) → 新目标
-                if ($null -ne $p.targetX) {
-                    $dx = $p.targetX - $petWin.Left
-                    if ([Math]::Abs($dx) -lt 16) {
-                        $p.targetX = $null
-                        Set-PetAnim "idle"
-                        $p.t = 0
-                        $p.max = 120 + $script:rand.Next(120)
-                    } else {
-                        $p.dir = if ($dx -gt 0) { 1 } else { -1 }
-                        $name = if ($p.dir -eq 1) { "right" } else { "left" }
-                        if ($p.anim -ne $name) { Set-PetAnim $name }
-                        $targetSpeed = 2.2
-                        # 走路中偶尔小跳一下(可爱细节)
-                        if ($script:rand.Next(500) -eq 0) { $p.hopT = 8 }
-                    }
-                } elseif ($p.anim -eq "idle") {
-                    Maybe-IdleAction
-                    # 注视只是显示层(Codex 原版 modeDeadline 到点照样走, 不冻结漫游)
-                    if ($p.t -ge $p.max) {
-                        # 40% 概率继续歇着(降频), 否则选屏幕内随机目标
-                        if ($script:rand.Next(100) -lt 40) {
-                            $p.t = 0
-                            $p.max = 120 + $script:rand.Next(120)
-                        } else {
-                            # 短途散步: 目标在当前位置 ±500 逻辑像素内(WorkArea 物理→逻辑换算), 不长途奔袭
-                            $wa2 = [System.Windows.SystemParameters]::WorkArea
-                            $minX2 = $wa2.Left / $script:dpiScale
-                            $maxX2 = $wa2.Right / $script:dpiScale - $petWin.Width
-                            $lo = [Math]::Max($minX2, $petWin.Left - 500)
-                            $hi = [Math]::Min($maxX2, $petWin.Left + 500)
-                            if ($hi - $lo -gt 40) { $p.targetX = $lo + $script:rand.Next([int]($hi - $lo)) }
-                            else { $p.targetX = $lo }
-                        }
-                    }
-                }
-            }
-            "follow" {
-                $mp = [System.Windows.Forms.Cursor]::Position
-                $mx = $mp.X / $script:dpiScale
-                $targetLeft = $mx - 180
-                $dx = $targetLeft - $petWin.Left
-                if ([Math]::Abs($dx) -gt 24) {
-                    $p.dir = if ($dx -gt 0) { 1 } else { -1 }
-                    $name = if ($p.dir -eq 1) { "right" } else { "left" }
-                    if ($p.anim -ne $name) { Set-PetAnim $name }
-                    $targetSpeed = [Math]::Min(4.2, [Math]::Abs($dx) / 50.0)
-                } else {
-                    if ($p.anim -ne "idle") { Set-PetAnim "idle" }
-                }
-            }
-            "stay" {
-                if ($p.anim -ne "idle") { Set-PetAnim "idle" }
-                Maybe-IdleAction
-            }
-        }
-    }
-
-    # 三视图无注视帧: 注视感已由 face 转向 + 摇摆体现
-
-    # 加减速惯性
-    if ($p.speed -lt $targetSpeed) { $p.speed = [Math]::Min($targetSpeed, $p.speed + 0.35) }
-    elseif ($p.speed -gt $targetSpeed) { $p.speed = [Math]::Max($targetSpeed, $p.speed - 0.35) }
-
-    # 窗口级真移动: 走路时移动桌宠窗口本身(Codex/大肥鱼式), 宠物在窗口内位置固定
-    if ($p.speed -gt 0.05) {
-        $petWin.Left += $p.dir * $p.speed
-        # WorkArea 返回物理像素, petWin.Left 是逻辑坐标 → 用 dpiScale 统一换算
-        $wa = [System.Windows.SystemParameters]::WorkArea
-        $minX = $wa.Left / $script:dpiScale
-        $maxX = $wa.Right / $script:dpiScale - $petWin.Width
-        if ($petWin.Left -le $minX -or $petWin.Left -ge $maxX) {
-            # 碰边界: clamp + 视为到达(清除目标, 回去休息) —— 否则目标在边界外会永远走不到、一直撞墙
-            $petWin.Left = [Math]::Max($minX, [Math]::Min($maxX, $petWin.Left))
-            $p.targetX = $null
-            Set-PetAnim "idle"
-            $p.t = 0
-            $p.max = 100 + $script:rand.Next(100)
-            $p.fade = 0.5
-        }
-    }
-    if ($p.fade -lt 1.0) { $p.fade = [Math]::Min(1.0, $p.fade + 0.06) }
-    $petHost.Opacity = $p.fade
-
-    # 摇摆 + 拖拽侧身 (走路时摆动幅度更大, 补帧数少的僵硬感)
-    $lean = if ($p.drag) { 8.0 } else { 0.0 }
-    $walking = ($p.anim -eq "right" -or $p.anim -eq "left")
-    $swing = if ($walking) { 4.5 } else { 2 }
-
-    # 待机小动作(大肥鱼式程序动画): sway 转体摇摆 / stretch 拉伸
-    $actRot = 0.0; $actSx = 0.0; $actSy = 0.0
-    if ($p.action) {
-        $p.actionT -= 0.03
-        if ($p.actionT -le 0) { $p.action = $null }
-        elseif ($p.action -eq "sway") {
-            $actRot = [Math]::Sin($p.actionT * [Math]::PI * 2) * 10 * $p.actionT
-        } elseif ($p.action -eq "stretch") {
-            $actSy = 0.06 * [Math]::Sin($p.actionT * [Math]::PI)
-            $actSx = -0.03 * [Math]::Sin($p.actionT * [Math]::PI)
-        }
-    }
-    $script:petRotate.Angle = [Math]::Sin($p.phase * 2.2) * $swing + $lean + $actRot
-    # 进食咀嚼挤压: 身体随咀嚼微微压缩回弹
-    $chew = if ($p.feeding) { 1 - 0.045 * [Math]::Abs([Math]::Sin($p.phase * 7)) } else { 1 }
-    # 镜像: 侧面视图 face=-1 时水平翻转(大肥鱼式 scale(-1,1)); 正面/背面不翻转
-    $mirror = if ($p.view -eq "side") { $p.face } else { 1 }
-    $script:petScale.ScaleX = $mirror * $breath * $script:petSize * $chew * (1 + $actSx)
-    $script:petScale.ScaleY = $breath * $script:petSize * $chew * (1 + $actSy)
-
-    # 跳跃抛物线 / 走路弹跳 (上下起伏让步伐更生动) / 走路小跳脉冲
-    $jumpY = 0.0
-    if ($p.anim -eq "jump") {
-        # 程序跳跃抛物线(无帧动画, 用时间驱动)
-        $p.jumpT += 0.10
-        $jumpY = -80 * [Math]::Sin([Math]::Min(1.0, $p.jumpT) * [Math]::PI)
-        if ($p.jumpT -ge 1.0) { $p.jumpT = 0.0; Set-PetAnim "idle"; $p.t = 0; $p.max = 40 + $script:rand.Next(40) }
-    } elseif ($walking) {
-        $jumpY = -[Math]::Abs([Math]::Sin($p.phase * 2.8)) * 16
-    }
-    if ($p.hopT -gt 0) {
-        $p.hopT--
-        $jumpY += -[Math]::Abs([Math]::Sin($p.hopT / 8.0 * [Math]::PI)) * 22
-    }
-
-    $y = $p.y + $jumpY
-    [System.Windows.Controls.Canvas]::SetLeft($petHost, $p.x)
-    [System.Windows.Controls.Canvas]::SetTop($petHost, $y)
-    if ($p.emoji) {
-        [System.Windows.Controls.Canvas]::SetLeft($petEmoji, $p.x + 140)
-        [System.Windows.Controls.Canvas]::SetTop($petEmoji, $y - 40)
-    }
-
-    # 气泡跟随: 悬在桌宠头顶, 随走动/跳跃移动; 到时自动淡出
-    if ($bubbleRoot.Opacity -gt 0.05) {
-        $bw = $bubbleRoot.ActualWidth
-        if ($bw -lt 10) { $bw = 320 }
-        $bh = $bubbleRoot.ActualHeight
-        if ($bh -lt 10) { $bh = 60 }
-        $bx = $p.x + 150 - $bw / 2
-        $bx = [Math]::Max(6, [Math]::Min(34, $bx))
-        $by = $y + 30 - $bh
-        $by = [Math]::Max(8, $by)
-        [System.Windows.Controls.Canvas]::SetLeft($bubbleRoot, $bx)
-        [System.Windows.Controls.Canvas]::SetTop($bubbleRoot, $by)
-    }
-    if ($script:bubbleHideAt -gt 0 -and $script:sw.ElapsedMilliseconds -ge $script:bubbleHideAt) {
-        Hide-Bubble
-    }
-}
 
 # ------------------------------------------------------------ UI 工具 ----
 function Set-Panel([string]$name) {
@@ -1129,10 +685,8 @@ function Start-SetupDsh {
             if ($ok) {
                 $setupLogBox.Text = "✓ 装配完成！DSH 已可用。`n$tail"
                 $setupState.Text = "dsh ✓ $ok"
-                Set-PetTalk "环境装好啦，随时可以开工~" $false $true
             } else {
                 $setupLogBox.Text = "✗ 安装失败或未检测到 dsh，请看日志尾部：`n$tail"
-                Invoke-PetSad "呜…装配失败了，看看日志再试一次吧~"
             }
         } else {
             try { $t = (Get-Content -LiteralPath "$env:TEMP\dsh-setup.log" -Tail 2 -ErrorAction SilentlyContinue) -join " "; $setupLogBox.Text = "安装中…`n$t" } catch { }
@@ -1301,13 +855,11 @@ function Start-RestartFlow([bool]$openBrowser) {
     $script:busy = $true
     $script:busySince = [DateTime]::Now
     $openState.Text = "正在重启…"
-    Set-PetTalk "收到，正在重启，等我一下下~"
     Stop-DshServer
     $ok = Start-DshServer
     if (-not $ok) {
         $openState.Text = "启动失败：未找到 dsh 可执行文件"
         $script:busy = $false
-        Invoke-PetSad "呜…没找到 dsh，装一下环境吧~"
         return
     }
     $script:restartWaited = 0
@@ -1320,14 +872,12 @@ function Start-RestartFlow([bool]$openBrowser) {
             $script:busy = $false
             Update-StatusAll
             $openState.Text = "重启完成 ✓"
-            Set-PetTalk "重启好啦！"
             if ($openBrowser) { Start-DshUrl }
         } elseif ($script:restartWaited -gt 45) {
             $script:restartPoll.Stop()
             $script:busy = $false
             $openState.Text = "重启超时，请查看日志"
             $openLogBox.Text = Get-LogTail $ErrLog
-            Invoke-PetSad "呜…重启超时了，帮我看看日志嘛~"
         }
     })
     $script:restartPoll.Start()
@@ -1342,311 +892,6 @@ function Update-StatusAll {
     $minStatusText.Text = $text
 }
 
-# ------------------------------------------------------------ 鲸鱼互动 ----
-# 气泡: 跟随桌宠 + 淡入淡出 + 内容可变(闲聊/思考/庆祝/回嘴/系统提醒)
-$script:bubbleHideAt = 0
-function Set-Speech([string]$text, [bool]$showChips = $false, [int]$stayMs = 4200, [bool]$inner = $false) {
-    $speechText.Text = $text
-    if ($showChips) { $speechChips.Visibility = [System.Windows.Visibility]::Visible }
-    else { $speechChips.Visibility = [System.Windows.Visibility]::Collapsed }
-    # 心声气泡(大肥鱼式): 灰底 + 斜体 + 灰字
-    if ($inner) {
-        $speechBubble.Background = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#EBE8E8EE"))
-        $speechBubble.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#C8C8D2"))
-        $speechText.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#7D7D8A"))
-        $speechText.FontStyle = [System.Windows.FontStyles]::Italic
-    } else {
-        $speechBubble.Background = [System.Windows.Media.Brushes]::White
-        $speechBubble.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#7AA8F0"))
-        $speechText.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#1F2A44"))
-        $speechText.FontStyle = [System.Windows.FontStyles]::Normal
-    }
-    $bubbleRoot.Opacity = 0
-    $da = [System.Windows.Media.Animation.DoubleAnimation]::new(1.0, [System.Windows.Duration]::new([TimeSpan]::FromMilliseconds(180)))
-    $bubbleRoot.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $da)
-    $script:bubbleHideAt = $script:sw.ElapsedMilliseconds + $stayMs
-    $script:lastIdleAt = [DateTime]::Now
-}
-
-function Hide-Bubble {
-    if ($bubbleRoot.Opacity -gt 0.05) {
-        $da = [System.Windows.Media.Animation.DoubleAnimation]::new(0.0, [System.Windows.Duration]::new([TimeSpan]::FromMilliseconds(240)))
-        $bubbleRoot.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $da)
-    }
-    $script:bubbleHideAt = 0
-}
-
-function Say-Idle {
-    $now = [DateTime]::Now
-    if (($now - $script:lastIdleAt).TotalSeconds -lt 12) { return }
-    if ($speechChips.Visibility -eq [System.Windows.Visibility]::Visible) { return }
-    if ($script:pet.busy) { $line = $script:thinkLines | Get-Random }
-    else { $line = $script:idleLines | Get-Random }
-    Set-Speech $line
-}
-
-# ------------------------------------------------------------ 桌宠交互 ----
-$script:pet.downX = 0.0
-$script:pet.downY = 0.0
-$script:pet.moved = $false
-
-function Invoke-PetClicked([bool]$force = $false) {
-    if ($script:pet.drag) { return }
-    Set-PetTalk "怎么啦？想让我做什么？" $true $true
-    Set-PetAnim "wave" $false
-    Set-PetEmoji "👋"
-    # 挥手感: 转体摇摆程序动作(大肥鱼式)
-    $script:pet.action = "sway"
-    $script:pet.actionT = 1.0
-}
-
-function Invoke-PetJump {
-    Set-PetAnim "jump" $false
-    Set-PetEmoji "🎈"
-}
-
-# 失败动作模组(failed 动画 + 😵 + 台词): 装配/重启失败等场景调用
-function Invoke-PetSad([string]$text) {
-    Set-PetAnim "failed" $false
-    Set-PetEmoji "😵"
-    Set-PetTalk $text $false $true
-}
-
-function Add-PetMenuItem([string]$text, [string]$tag, [System.Windows.Controls.ContextMenu]$menu) {
-    $mi = [System.Windows.Controls.MenuItem]::new()
-    $mi.Header = $text
-    $mi.Tag = $tag
-    $mi.Add_Click({ param($s, $e) Invoke-PetMenu ([string]$s.Tag) })
-    $menu.Items.Add($mi) | Out-Null
-    return $mi
-}
-
-function Invoke-PetMenu([string]$tag) {
-    $p = $script:pet
-    switch ($tag) {
-        "roam"   { $p.mode = "roam";   Set-PetTalk "好呀，我去溜达溜达~" }
-        "follow" { $p.mode = "follow"; Set-PetTalk "我跟着你的鼠标走，嘿嘿~" }
-        "stay"   { $p.mode = "stay";   Set-PetTalk "那我乖乖待着~" }
-        "feed" {
-            # 进食动作模组: wait(蹲坐) + 咀嚼挤压 + 🍪 持续, 4.5 秒后回待机
-            Set-PetEmoji "🍪"
-            Set-PetTalk "哇，谢谢你！啊呜一口~" $false $true
-            Set-PetAnim "wait" $true
-            $script:pet.feeding = $true
-            $script:pet.feedT = 0
-        }
-        "bigger" {
-            if ($script:petSize -lt 1.25) { $script:petSize += 0.10; Save-PetCfg; Set-PetTalk "再大一点就抱不动啦~" }
-        }
-        "smaller" {
-            if ($script:petSize -gt 0.75) { $script:petSize -= 0.10; Save-PetCfg; Set-PetTalk "变小一点，方便你干活~" }
-        }
-        "exit" { Set-PetTalk "再见啦~"; $window.Close() }
-        "setkey" {
-            Add-Type -AssemblyName Microsoft.VisualBasic
-            $k = [Microsoft.VisualBasic.Interaction]::InputBox("粘贴 DeepSeek API Key（sk-...）：", "设置 Key", $script:dsKey)
-            if ($k) {
-                $script:dsKey = $k
-                Save-PetCfg
-                Set-PetTalk "Key 记住啦，点气泡里的「🗨️ 聊天」和我说话吧~" $false $true
-            }
-        }
-        "say" {
-            Set-PetTalk ($script:talkLines | Get-Random) $false $true
-        }
-        "topmost" {
-            $script:petTopmost = -not $script:petTopmost
-            $petWin.Topmost = $script:petTopmost
-            if ($script:petTopmost) { Set-PetTalk "我一直飘在最上面啦~" $false $true }
-            else { Set-PetTalk "好，不抢你的视线了~" $false $true }
-        }
-        "setcity" {
-            Add-Type -AssemblyName Microsoft.VisualBasic
-            $ct = [Microsoft.VisualBasic.Interaction]::InputBox("所在城市（天气查询用）：", "设置城市", $script:petCity)
-            if ($ct) {
-                $script:petCity = $ct
-                Save-PetCfg
-                Set-PetTalk "记住啦，家在 $ct ~" $false $true
-            }
-        }
-        "weather" { Invoke-PetWeather }
-        # 喂食子菜单(大肥鱼同款 5 种食物, 各自台词)
-        "food-fish"  { Invoke-PetFeed "🐟" "小鱼干！我的最爱！" }
-        "food-cake"  { Invoke-PetFeed "🍰" "蛋糕！罪恶但快乐……" }
-        "food-candy" { Invoke-PetFeed "🍭" "棒棒糖！转圈圈～" }
-        "food-dango" { Invoke-PetFeed "🍡" "三色团子！软乎乎～" }
-        "food-gem"   { Invoke-PetFeed "💎" "钻石？！这能吃吗……咕咚。真香！" }
-    }
-}
-
-# 喂食动作(大肥鱼式): 蹲吃+咀嚼+对应食物表情和台词
-function Invoke-PetFeed([string]$foodEmoji, [string]$line) {
-    Set-PetEmoji $foodEmoji
-    Set-PetTalk $line $false $true
-    Set-PetAnim "wait" $true
-    $script:pet.feeding = $true
-    $script:pet.feedT = 0
-}
-
-# 天气查询(大肥鱼同款 wttr.in, 后台线程)
-function Invoke-PetWeather {
-    $city = $script:petCity
-    if (-not $city) { Set-PetTalk "还没告诉我你在哪个城市哦，右键「设置城市」~" $false $true; return }
-    Set-PetTalk "我去看看天气…" $false $true
-    $th = [System.Threading.Thread]::new({
-        param($ct)
-        $reply = ""
-        try {
-            $u = "https://wttr.in/" + [Uri]::EscapeDataString($ct) + "?format=%c+%t+%w&m"
-            $r = Invoke-WebRequest -Uri $u -UseBasicParsing -TimeoutSec 8
-            $t = ($r.Content -replace '\s+', ' ').Trim()
-            if ($t) { $reply = "$ct 现在 $t" }
-            else { $reply = "天气站没回话，晚点再试~" }
-        } catch {
-            $reply = "呜…查天气的网络断啦，晚点再试~"
-        }
-        $petWin.Dispatcher.Invoke([Action[string]]{
-            param($rp)
-            Set-PetTalk $rp $false $true
-        }, $reply)
-    })
-    $th.IsBackground = $true
-    $th.Start($city)
-}
-
-# 桌宠配置: 大小 + DeepSeek Key + 城市 (持久化, 关闭重开保持)
-$script:petSize = 1.0
-$script:dsKey = ""
-$script:petCity = ""
-$script:petTopmost = $true
-try {
-    if (Test-Path -LiteralPath $PetCfgFile) {
-        $cfg = Get-Content -LiteralPath $PetCfgFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($cfg.petSize -and $cfg.petSize -ge 0.5 -and $cfg.petSize -le 1.6) { $script:petSize = [double]$cfg.petSize }
-        if ($cfg.dsKey) { $script:dsKey = [string]$cfg.dsKey }
-        if ($cfg.city) { $script:petCity = [string]$cfg.city }
-    }
-} catch { }
-
-function Save-PetCfg {
-    try {
-        @{ petSize = $script:petSize; dsKey = $script:dsKey; city = $script:petCity } | ConvertTo-Json | Set-Content -LiteralPath $PetCfgFile -Encoding UTF8
-    } catch { }
-}
-
-# ------------------------------------------------------------ AI 对话(大肥鱼同款: DeepSeek API + 40 条历史 + 后台线程) ----
-$script:chatHistory = New-Object System.Collections.ArrayList
-$script:chatBusy = $false
-
-function Invoke-PetChat {
-    if ($script:chatBusy) { Set-PetTalk "等等，上一句还没回完呢~" $false $true; return }
-    if (-not $script:dsKey) { Set-PetTalk "还没配 DeepSeek Key 哦，右键菜单「设置 Key」~" $false $true; return }
-    Add-Type -AssemblyName Microsoft.VisualBasic
-    $msg = [Microsoft.VisualBasic.Interaction]::InputBox("和鲸鱼娘说点什么？", "鲸鱼娘聊天", "")
-    if (-not $msg) { return }
-    $script:chatBusy = $true
-    $script:pet.chatting = $true
-    Set-PetTalk "让我想想…" $false $true
-    # 打包消息(闭包捕获, 避免跨线程 script 作用域问题)
-    $messages = @(@{ role = "system"; content = "你是 DSH 启动器的鲸鱼娘桌宠，温柔可爱有点小傲娇，每句话不超过 25 字。" })
-    foreach ($h in $script:chatHistory) { $messages += $h }
-    $messages += @{ role = "user"; content = $msg }
-    $key = $script:dsKey
-    $th = [System.Threading.Thread]::new({
-        param($m, $k)
-        $reply = ""
-        try {
-            $body = @{ model = "deepseek-chat"; messages = $m; max_tokens = 100; temperature = 0.9 } | ConvertTo-Json -Depth 5
-            $resp = Invoke-RestMethod -Uri "https://api.deepseek.com/v1/chat/completions" -Method Post -Headers @{ Authorization = "Bearer $k" } -ContentType "application/json" -Body $body -TimeoutSec 15
-            $reply = $resp.choices[0].message.content.Trim()
-            if ($reply.Length -gt 30) { $reply = $reply.Substring(0, 28) + "…" }
-        } catch {
-            $reply = "呜…没连上：" + ($_.Exception.Message.Substring(0, [Math]::Min(12, $_.Exception.Message.Length)))
-        }
-        $petWin.Dispatcher.Invoke([Action[string]]{
-            param($r)
-            $script:chatBusy = $false
-            $script:pet.chatting = $false
-            Set-PetTalk $r $false $true
-            # 历史追加(主线程安全)
-            [void]$script:chatHistory.Add(@{ role = "user"; content = $msg })
-            [void]$script:chatHistory.Add(@{ role = "assistant"; content = $r })
-            if ($script:chatHistory.Count -gt 40) { $script:chatHistory.RemoveRange(0, $script:chatHistory.Count - 40) }
-        }, $reply)
-    })
-    $th.IsBackground = $true
-    $th.Start($messages, $key)
-}
-$script:petMenu = [System.Windows.Controls.ContextMenu]::new()
-Add-PetMenuItem "🚶 散步模式" "roam" $script:petMenu | Out-Null
-Add-PetMenuItem "🖱 跟随鼠标" "follow" $script:petMenu | Out-Null
-Add-PetMenuItem "🏠 原地待着" "stay" $script:petMenu | Out-Null
-$script:petMenu.Items.Add([System.Windows.Controls.Separator]::new()) | Out-Null
-# 喂食子菜单(大肥鱼同款 5 食物)
-$miFeed = [System.Windows.Controls.MenuItem]::new()
-$miFeed.Header = "🍪 喂食"
-foreach ($f in @(
-    @{ t = "🐟 小鱼干"; tag = "food-fish" },
-    @{ t = "🍰 蛋糕"; tag = "food-cake" },
-    @{ t = "🍭 棒棒糖"; tag = "food-candy" },
-    @{ t = "🍡 三色团子"; tag = "food-dango" },
-    @{ t = "💎 钻石"; tag = "food-gem" }
-)) {
-    $mi = [System.Windows.Controls.MenuItem]::new()
-    $mi.Header = $f.t
-    $mi.Tag = $f.tag
-    $mi.Add_Click({ param($s, $e) Invoke-PetMenu ([string]$s.Tag) })
-    $miFeed.Items.Add($mi) | Out-Null
-}
-$script:petMenu.Items.Add($miFeed) | Out-Null
-Add-PetMenuItem "💬 说句话" "say" $script:petMenu | Out-Null
-Add-PetMenuItem "🔍 放大一点" "bigger" $script:petMenu | Out-Null
-Add-PetMenuItem "🔎 缩小一点" "smaller" $script:petMenu | Out-Null
-$script:petMenu.Items.Add([System.Windows.Controls.Separator]::new()) | Out-Null
-Add-PetMenuItem "🌤 查看天气" "weather" $script:petMenu | Out-Null
-Add-PetMenuItem "🏙 设置城市" "setcity" $script:petMenu | Out-Null
-Add-PetMenuItem "📌 置顶开关" "topmost" $script:petMenu | Out-Null
-Add-PetMenuItem "🔑 设置 Key" "setkey" $script:petMenu | Out-Null
-$script:petMenu.Items.Add([System.Windows.Controls.Separator]::new()) | Out-Null
-Add-PetMenuItem "👋 退出" "exit" $script:petMenu | Out-Null
-$petHost.ContextMenu = $script:petMenu
-
-# 桌宠窗口交互: 双击跳 / 按住拖整窗(手动 MouseMove 非阻塞版——DragMove 会阻塞 UI 线程导致卡) / 短按=单击挥手 / 右键菜单
-$script:pet.dragStartMouse = @(0, 0)
-$script:pet.dragStartWin = @(0.0, 0.0)
-$script:pet.moved = $false
-$petHost.Add_MouseLeftButtonDown({
-    param($s, $e)
-    $p = $script:pet
-    if ($e.ClickCount -ge 2) { Invoke-PetJump; return }
-    $p.drag = $true
-    $p.moved = $false
-    $mp = [System.Windows.Forms.Cursor]::Position
-    $p.dragStartMouse = @($mp.X, $mp.Y)
-    $p.dragStartWin = @($petWin.Left, $petWin.Top)
-    $petHost.CaptureMouse() | Out-Null
-})
-$petHost.Add_MouseMove({
-    param($s, $e)
-    $p = $script:pet
-    if (-not $p.drag) { return }
-    $mp = [System.Windows.Forms.Cursor]::Position
-    $dx = ($mp.X - $p.dragStartMouse[0]) / $script:dpiScale
-    $dy = ($mp.Y - $p.dragStartMouse[1]) / $script:dpiScale
-    if ([Math]::Abs($dx) + [Math]::Abs($dy) -gt 5) { $p.moved = $true }
-    $petWin.Left = $p.dragStartWin[0] + $dx
-    $petWin.Top = $p.dragStartWin[1] + $dy
-})
-$petHost.Add_MouseLeftButtonUp({
-    param($s, $e)
-    $p = $script:pet
-    if (-not $p.drag) { return }
-    $p.drag = $false
-    $petHost.ReleaseMouseCapture() | Out-Null
-    if (-not $p.moved) { Invoke-PetClicked }
-    $p.moved = $false
-})
-
 # ------------------------------------------------------------ 事件绑定 ----
 $window.FindName("BtnCloseMin").Add_Click({
     # 直接关闭: 整个退出(含桌宠), 不驻留后台
@@ -1654,11 +899,12 @@ $window.FindName("BtnCloseMin").Add_Click({
 })
 $window.FindName("BtnMinMin").Add_Click({ $window.WindowState = [System.Windows.WindowState]::Minimized })
 $window.FindName("BtnPetToggle").Add_Click({
-    if ($petWin.IsVisible) {
-        $petWin.Hide()
+    # 桌宠 = 依附的 bigfish Python 进程: 开关 = 拉起/关闭进程
+    if (Get-PetAlive) {
+        Stop-Pet
         $window.FindName("BtnPetToggle").Content = "🐳 桌宠 关"
     } else {
-        $petWin.Show()
+        Start-Pet
         $window.FindName("BtnPetToggle").Content = "🐳 桌宠 开"
     }
 })
@@ -1678,27 +924,6 @@ $window.FindName("BtnRestart").Add_Click({ Start-RestartFlow $true })
 $window.FindName("BtnEnvRefresh").Add_Click({ Update-EnvPanel })
 $window.FindName("BtnSetupGo").Add_Click({ Start-SetupDsh })
 $window.FindName("BtnOpenSkillsDir").Add_Click({ if (Test-Path -LiteralPath $SkillsRoot) { Start-Process explorer.exe -ArgumentList "`"$SkillsRoot`"" } })
-
-# 桌宠气泡内的操作按钮
-$petWin.FindName("ChipOpen").Add_Click({ Set-Speech "好嘞，这就帮你打开~"; Start-OpenFlow })
-$petWin.FindName("ChipRestart").Add_Click({ Set-Speech "收到，正在重启，等我一下下~"; Start-RestartFlow $true })
-$petWin.FindName("ChipEnv").Add_Click({
-    Set-Speech "环境信息在控制台里更清楚，这就带你过去~"
-    $window.WindowState = [System.Windows.WindowState]::Normal
-    $window.Activate()
-    Set-Panel "env"
-    Update-StatusAll
-})
-$petWin.FindName("ChipSkills").Add_Click({
-    Set-Speech "技能库走这边，看看新朋友~"
-    $window.WindowState = [System.Windows.WindowState]::Normal
-    $window.Activate()
-    Set-Panel "skills"
-    Update-StatusAll
-})
-$petWin.FindName("ChipPet").Add_Click({ Set-Speech ($script:petLines | Get-Random); Set-PetAnim "wave" $false; Set-PetEmoji "😊" })
-$petWin.FindName("ChipTalk").Add_Click({ Set-Speech ($script:talkLines | Get-Random) })
-$petWin.FindName("ChipChat").Add_Click({ Invoke-PetChat })
 
 # 标题栏拖拽
 $window.FindName("MinBar").Add_MouseLeftButtonDown({ $window.DragMove() })
@@ -1736,22 +961,14 @@ Add-TrayItem "打开控制台" {
     $window.Activate()
 } | Out-Null
 Add-TrayItem "显示/隐藏桌宠" {
-    if ($petWin.IsVisible) {
-        $petWin.Hide()
+    if (Get-PetAlive) {
+        Stop-Pet
         $window.FindName("BtnPetToggle").Content = "🐳 桌宠 关"
     } else {
-        $petWin.Show()
+        Start-Pet
         $window.FindName("BtnPetToggle").Content = "🐳 桌宠 开"
     }
 } | Out-Null
-$script:miThrough = Add-TrayItem "鼠标穿透桌宠: 关" {
-    $script:clickThrough = -not $script:clickThrough
-    $hwnd = ([System.Windows.Interop.WindowInteropHelper]::new($petWin)).Handle
-    $ex = [DSH.WinLong]::GetWindowLong($hwnd, -20)
-    if ($script:clickThrough) { $ex = $ex -bor 0x20 -bor 0x80000 } else { $ex = $ex -band (-bnot 0x20) }
-    [DSH.WinLong]::SetWindowLong($hwnd, -20, $ex) | Out-Null
-    $script:miThrough.Text = "鼠标穿透桌宠: " + $(if ($script:clickThrough) { "开" } else { "关" })
-}
 $script:miAutoStart = Add-TrayItem ("开机自启: " + $(if ($script:autoStart) { "开" } else { "关" })) {
     $script:autoStart = -not $script:autoStart
     try {
@@ -1776,86 +993,12 @@ $script:tray.Add_DoubleClick({
     $window.Activate()
 })
 
-# ------------------------------------------------------------ DSH 会话活跃度联动 ----
-# sessions 目录最近 15s 内有写入 → 主人在忙: 桌宠切 think/review 动画
-# 忙完(持续>20s) → 跳跃庆祝 + 台词
-function Update-PetBusy {
-    if ($NoBusy) { $script:pet.busy = $false; return }
-    $busy = $false
-    if (Test-Path -LiteralPath $SessionsDir) {
-        try {
-            $newest = Get-ChildItem -LiteralPath $SessionsDir -File -Recurse -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            if ($newest -and ([DateTime]::Now - $newest.LastWriteTime).TotalSeconds -lt 15) { $busy = $true }
-        } catch { }
-    }
-    $p = $script:pet
-    if ($busy -and -not $p.busy) {
-        $p.busy = $true
-        $p.busyAt = [DateTime]::Now
-        Set-PetTalk "主人在忙呢，我陪你一起~"
-    } elseif (-not $busy -and $p.busy) {
-        $p.busy = $false
-        $p.wasBusy = $true
-        if ($p.busyAt) {
-            $sec = ([DateTime]::Now - $p.busyAt).TotalSeconds
-            $p.busyAt = $null
-            if ($sec -gt 20) {
-                Set-PetAnim "excited" $false
-                Set-PetEmoji "🎉"
-                Set-PetTalk "忙完啦！任务完成，辛苦啦~"
-            }
-        }
-    }
-
-    # 系统监控(借鉴 大肥鱼桌宠): 每 12 秒检查一次, 超阈值冒泡提醒
-    $script:sysTick++
-    if ($script:sysTick % 10 -eq 0) {
-        try {
-            $mem = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
-            if ($mem -and $mem.TotalVisibleMemorySize -gt 0) {
-                $memPct = 100 * (1 - $mem.FreePhysicalMemory / $mem.TotalVisibleMemorySize)
-                if ($memPct -gt 90) { Set-PetTalk ("内存快满啦 ({0:N0}%)，记得清理哦~" -f $memPct) }
-            }
-            $cpuAvg = (Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Measure-Object -Property LoadPercentage -Average).Average
-            if ($cpuAvg -and $cpuAvg -gt 85) { Set-PetTalk ("CPU 好烫 ({0:N0}%)，喝口水歇歇~" -f $cpuAvg) }
-        } catch { }
-    }
-    # GPU 温度(大肥鱼式): 每 60 秒后台线程查一次, 不阻塞 UI
-    if ($script:sysTick % 20 -eq 0) {
-        try {
-            if ($null -eq $script:gpuChecked) {
-                $script:gpuChecked = $true
-                $script:hasNvidiaSmi = $false
-                if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { $script:hasNvidiaSmi = $true }
-            }
-            if ($script:hasNvidiaSmi -and -not $script:gpuQuerying) {
-                $script:gpuQuerying = $true
-                $th = [System.Threading.Thread]::new({
-                    $temp = ""
-                    try { $temp = (& nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>$null | Select-Object -First 1) } catch { }
-                    $petWin.Dispatcher.Invoke([Action[string]]{
-                        param($t)
-                        $script:gpuQuerying = $false
-                        if ($t -match '^\s*(\d+)' -and [int]$matches[1] -gt 80) {
-                            Set-PetTalk ("我感觉我的鱼鳍快熟了 (GPU {0}°C)~" -f $matches[1])
-                        }
-                    }, $temp)
-                })
-                $th.IsBackground = $true
-                $th.Start()
-            }
-        } catch { }
-    }
-}
-
 # ------------------------------------------------------------ 定时器 ----
-# 状态刷新 + 会话活跃度 (3s)
+# 状态刷新 (3s) + busy 看门狗(联动已移至 bigfish Python 桌宠内部)
 $script:statusTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:statusTimer.Interval = [TimeSpan]::FromSeconds(3)
 $script:statusTimer.Add_Tick({
     Update-StatusAll
-    Update-PetBusy
     # busy 看门狗: 任何流程卡死超过 60 秒强制复位, 防止重启按钮永久失效
     if ($script:busy -and $script:busySince -and ([DateTime]::Now - $script:busySince).TotalSeconds -gt 60) {
         $script:busy = $false
@@ -1864,45 +1007,14 @@ $script:statusTimer.Add_Tick({
 })
 $script:statusTimer.Start()
 
-# 桌宠行为循环 (100ms)
-$script:petTimer = [System.Windows.Threading.DispatcherTimer]::new()
-$script:petTimer.Interval = [TimeSpan]::FromMilliseconds(100)
-$script:petTimer.Add_Tick({
-    Update-Pet
-    if ($script:heroTT) { $script:heroTT.Y = [Math]::Sin($script:pet.phase * 0.6) * 7 }
-})
-$script:petTimer.Start()
-
-# 待机台词 (4s 检查一次)
-$script:idleTimer = [System.Windows.Threading.DispatcherTimer]::new()
-$script:idleTimer.Interval = [TimeSpan]::FromSeconds(4)
-$script:idleTimer.Add_Tick({ Say-Idle })
-$script:idleTimer.Start()
-
 # ------------------------------------------------------------ 启动 ----
-Set-PetAnim "idle"
-[System.Windows.Controls.Canvas]::SetLeft($petHost, $script:pet.x)
-[System.Windows.Controls.Canvas]::SetTop($petHost, $script:pet.y)
-
 Update-StatusAll
 Update-OpenPanel
+# 自动拉起 bigfish 桌宠(依附)
+Start-Pet
 
-# 桌宠默认显示(独立透明置顶窗口), 可用主界面顶栏开关隐藏
-$petWin.Show()
-# DPI 比例: 鼠标物理坐标→逻辑坐标换算(窗口级移动用)
-$script:dpiScale = 1.0
-try { $script:dpiScale = [System.Windows.PresentationSource]::FromVisual($petWin).CompositionTarget.TransformToDevice.M11 } catch { }
-Set-Speech "你好呀，我是 DSH 的小鲸鱼助手~ 点我一下，看看我能帮你做什么？" $true 8000
-
-# 自动测试: 1.5秒模拟点击鲸鱼, 2.5秒验证"抛错不死"(L6防火墙), 6秒后自动关闭
+# 自动测试: 2.5秒验证"抛错不死"(L6防火墙), 6秒后自动关闭
 if ($AutoTest) {
-    $script:testTick = [System.Windows.Threading.DispatcherTimer]::new()
-    $script:testTick.Interval = [TimeSpan]::FromMilliseconds(1500)
-    $script:testTick.Add_Tick({
-        $script:testTick.Stop()
-        Invoke-PetClicked
-    })
-    $script:testTick.Start()
     $script:boomTick = [System.Windows.Threading.DispatcherTimer]::new()
     $script:boomTick.Interval = [TimeSpan]::FromMilliseconds(2500)
     $script:boomTick.Add_Tick({
@@ -1932,22 +1044,17 @@ if ($Diag) {
     $t.Add_Tick({
         $t.Stop()
         $hero = $window.FindName("HeroWhale")
-        $pet = $petImage
         Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG hero: src=" + ($null -ne $hero.Source) + " w=" + $hero.ActualWidth + " h=" + $hero.ActualHeight + " vis=" + $hero.Visibility)
-        Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG pet:  src=" + ($null -ne $pet.Source) + " w=" + $pet.ActualWidth + " h=" + $pet.ActualHeight)
-        Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG pet2:  anim=" + $script:pet.anim + " view=" + $script:pet.view + " mode=" + $script:pet.mode + " busy=" + $script:pet.busy + " size=" + $script:petSize + " petWinVis=" + $petWin.IsVisible)
-        Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG emoji: vis=" + $petEmoji.Visibility + " text=" + $petEmoji.Text + " talkCd=" + $script:pet.talkCd)
+        Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG pet:  process=" + (Get-PetAlive))
         Add-Content -Path "$env:TEMP\dsh-diag.txt" -Value ("DIAG window: actualW=" + $window.ActualWidth + " actualH=" + $window.ActualHeight)
         $window.Close()
     })
     $t.Start()
 }
 
-# 主窗口关闭时同步关闭桌宠窗口并强制退出
-# (BeginInvokeShutdown/ExitAllFrames/Environment.Exit 在此双窗口场景下都不可靠, 进程会残留;
-#  最小实验证实 Stop-Process 自身是唯一稳定退出方式)
-# 注意: 不先 petWin.Close() —— 窗口销毁可能阻塞(动画/拖动中), 直接强杀进程即全部释放
+# 主窗口关闭: 结束桌宠进程并退出(Stop-Process 自身是唯一稳定退出方式)
 $window.Add_Closed({
+    Stop-Pet
     Stop-Process -Id $PID -Force
 })
 
