@@ -70,8 +70,10 @@ function Get-ServerPid {
 }
 
 function Test-ServerUp {
+    # 端口优先(毫秒级): 无监听直接判未运行, 避免服务挂掉时 HTTP 请求每 3 秒卡 UI 2 秒
+    if (-not (Get-ServerPid)) { return $false }
     try {
-        $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
+        $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 1
         return ($null -ne $r -and $r.StatusCode -ge 200 -and $r.StatusCode -lt 500)
     } catch { return $false }
 }
@@ -379,6 +381,15 @@ $xaml = @'
             </LinearGradientBrush>
           </Border.Background>
         </Border>
+        <!-- 底部淡蓝氛围光(借鉴 DSH-Transparent-UI-Plugin: 底部径向淡蓝使页面不"落地") -->
+        <Border Height="240" VerticalAlignment="Bottom" IsHitTestVisible="False">
+          <Border.Background>
+            <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+              <GradientStop Color="#249CC1E7" Offset="0"/>
+              <GradientStop Color="#00FAFAFA" Offset="1"/>
+            </LinearGradientBrush>
+          </Border.Background>
+        </Border>
 
         <Grid>
           <Grid.RowDefinitions>
@@ -663,6 +674,9 @@ $script:lastIdleAt   = [DateTime]::Now
 $script:rand         = [System.Random]::new()
 $script:sysTick      = 0
 $script:setupRunning = $false
+$script:skillsCache  = $null
+$script:skillsCacheAt = [DateTime]::MinValue
+$script:gpuQuerying = $false
 
 # 鲸鱼台词池
 $script:idleLines = @(
@@ -1240,8 +1254,13 @@ function Update-EnvPanel {
 }
 
 function Update-SkillsPanel {
+    # 缓存技能列表(30 秒内重复切换面板不再扫目录, 减少卡顿)
+    if ($null -eq $script:skillsCache -or $script:skillsCacheAt -lt ([DateTime]::Now - [TimeSpan]::FromSeconds(30))) {
+        $script:skillsCache = @(Get-SkillList)
+        $script:skillsCacheAt = [DateTime]::Now
+    }
     $skillCards.Children.Clear()
-    $skills = @(Get-SkillList)
+    $skills = $script:skillsCache
     $skillCountText.Text = "共 $($skills.Count) 个技能"
     if ($skills.Count -eq 0) {
         $t = [System.Windows.Controls.TextBlock]::new()
@@ -1565,18 +1584,40 @@ Add-PetMenuItem "🔑 设置 Key" "setkey" $script:petMenu | Out-Null
 Add-PetMenuItem "👋 退出" "exit" $script:petMenu | Out-Null
 $petHost.ContextMenu = $script:petMenu
 
-# 桌宠窗口交互: 双击跳 / 按住拖整窗(大肥鱼·Desktop-Pet 同款 DragMove) / 短按=单击挥手 / 右键菜单
+# 桌宠窗口交互: 双击跳 / 按住拖整窗(手动 MouseMove 非阻塞版——DragMove 会阻塞 UI 线程导致卡) / 短按=单击挥手 / 右键菜单
+$script:pet.dragStartMouse = @(0, 0)
+$script:pet.dragStartWin = @(0.0, 0.0)
+$script:pet.moved = $false
 $petHost.Add_MouseLeftButtonDown({
     param($s, $e)
     $p = $script:pet
     if ($e.ClickCount -ge 2) { Invoke-PetJump; return }
     $p.drag = $true
-    $downAt = [DateTime]::Now
-    Add-Content -Path "$env:TEMP\dsh-pet-click.log" -Value ("MOUSEDOWN hit, clickcount=" + $e.ClickCount)
-    try { $petWin.DragMove() } catch { Add-Content -Path "$env:TEMP\dsh-pet-click.log" -Value ("DRAGMOVE-ERR: " + $_.Exception.Message) }
+    $p.moved = $false
+    $mp = [System.Windows.Forms.Cursor]::Position
+    $p.dragStartMouse = @($mp.X, $mp.Y)
+    $p.dragStartWin = @($petWin.Left, $petWin.Top)
+    $petHost.CaptureMouse() | Out-Null
+})
+$petHost.Add_MouseMove({
+    param($s, $e)
+    $p = $script:pet
+    if (-not $p.drag) { return }
+    $mp = [System.Windows.Forms.Cursor]::Position
+    $dx = ($mp.X - $p.dragStartMouse[0]) / $script:dpiScale
+    $dy = ($mp.Y - $p.dragStartMouse[1]) / $script:dpiScale
+    if ([Math]::Abs($dx) + [Math]::Abs($dy) -gt 5) { $p.moved = $true }
+    $petWin.Left = $p.dragStartWin[0] + $dx
+    $petWin.Top = $p.dragStartWin[1] + $dy
+})
+$petHost.Add_MouseLeftButtonUp({
+    param($s, $e)
+    $p = $script:pet
+    if (-not $p.drag) { return }
     $p.drag = $false
-    Add-Content -Path "$env:TEMP\dsh-pet-click.log" -Value ("MOUSEDOWN done, dur=" + [int]([DateTime]::Now - $downAt).TotalMilliseconds)
-    if (([DateTime]::Now - $downAt).TotalMilliseconds -lt 220) { Invoke-PetClicked }
+    $petHost.ReleaseMouseCapture() | Out-Null
+    if (-not $p.moved) { Invoke-PetClicked }
+    $p.moved = $false
 })
 
 # ------------------------------------------------------------ 事件绑定 ----
@@ -1691,7 +1732,10 @@ $script:miAutoStart = Add-TrayItem ("开机自启: " + $(if ($script:autoStart) 
     $script:autoStart = -not $script:autoStart
     try {
         if ($script:autoStart) {
-            $cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + (Join-Path $ScriptDir 'dsh-launcher.ps1') + '" -HideConsole'
+            # 经 vbs 包装器启动(完全无控制台闪现); vbs 不存在则回退 powershell 命令
+            $vbs = Join-Path $ScriptDir '启动DSH.vbs'
+            if (Test-Path -LiteralPath $vbs) { $cmd = 'wscript.exe "' + $vbs + '"' }
+            else { $cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + (Join-Path $ScriptDir 'dsh-launcher.ps1') + '" -HideConsole' }
             Set-ItemProperty -Path $RunKey -Name "DSHLauncher" -Value $cmd
         } else {
             Remove-ItemProperty -Path $RunKey -Name "DSHLauncher" -ErrorAction SilentlyContinue
@@ -1753,7 +1797,7 @@ function Update-PetBusy {
             if ($cpuAvg -and $cpuAvg -gt 85) { Set-PetTalk ("CPU 好烫 ({0:N0}%)，喝口水歇歇~" -f $cpuAvg) }
         } catch { }
     }
-    # GPU 温度(大肥鱼式): 每 60 秒 nvidia-smi 查一次
+    # GPU 温度(大肥鱼式): 每 60 秒后台线程查一次, 不阻塞 UI
     if ($script:sysTick % 20 -eq 0) {
         try {
             if ($null -eq $script:gpuChecked) {
@@ -1761,11 +1805,21 @@ function Update-PetBusy {
                 $script:hasNvidiaSmi = $false
                 if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { $script:hasNvidiaSmi = $true }
             }
-            if ($script:hasNvidiaSmi) {
-                $temp = (& nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>$null | Select-Object -First 1)
-                if ($temp -match '^\s*(\d+)' -and [int]$matches[1] -gt 80) {
-                    Set-PetTalk ("我感觉我的鱼鳍快熟了 (GPU {0}°C)~" -f $matches[1])
-                }
+            if ($script:hasNvidiaSmi -and -not $script:gpuQuerying) {
+                $script:gpuQuerying = $true
+                $th = [System.Threading.Thread]::new({
+                    $temp = ""
+                    try { $temp = (& nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>$null | Select-Object -First 1) } catch { }
+                    $petWin.Dispatcher.Invoke([Action[string]]{
+                        param($t)
+                        $script:gpuQuerying = $false
+                        if ($t -match '^\s*(\d+)' -and [int]$matches[1] -gt 80) {
+                            Set-PetTalk ("我感觉我的鱼鳍快熟了 (GPU {0}°C)~" -f $matches[1])
+                        }
+                    }, $temp)
+                })
+                $th.IsBackground = $true
+                $th.Start()
             }
         } catch { }
     }
@@ -1864,8 +1918,8 @@ if ($Diag) {
 # 主窗口关闭时同步关闭桌宠窗口并强制退出
 # (BeginInvokeShutdown/ExitAllFrames/Environment.Exit 在此双窗口场景下都不可靠, 进程会残留;
 #  最小实验证实 Stop-Process 自身是唯一稳定退出方式)
+# 注意: 不先 petWin.Close() —— 窗口销毁可能阻塞(动画/拖动中), 直接强杀进程即全部释放
 $window.Add_Closed({
-    try { $petWin.Close() } catch { }
     Stop-Process -Id $PID -Force
 })
 
