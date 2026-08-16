@@ -708,15 +708,15 @@ function Reset-Wallpaper {
     try {
         Remove-Item -LiteralPath (Join-Path $script:WallpaperStatic "current.png") -Force -ErrorAction SilentlyContinue
         Update-WallpaperHtml $false
-        Show-WallpaperHint "✓ 已移除壁纸背景。刷新网页(F5)后壁纸清空、背景源回到流体; 玻璃主题保持你当前的开关状态。"
+        Show-WallpaperHint "✓ 已恢复原版UI: 玻璃已关、壁纸已清、背景源回流体。刷新网页(F5)生效。"
     } catch {
         Show-WallpaperHint "恢复失败: $($_.Exception.Message)"
     }
 }
 
 # 改写 dist/index.html 内联 <style id="dsh-wallpaper-css"> + <script id="dsh-wallpaper-bridge">:
-#   $apply=$true  注入 body 壁纸背景(刷新 ?t= 时间戳防缓存; 样式/桥缺失时自动补插)
-#   $apply=$false 清空为 background:none(桥脚本在下次页面加载时据此清空 Aqua 壁纸槽)
+#   $apply=$true  注入 body 壁纸背景(刷新 ?t= 时间戳防缓存; 样式/桥缺失时自动补插), 并清掉「原版UI」标记
+#   $apply=$false 清空为 background:none 并写入 dsh-original 标记(桥脚本据此一次性关玻璃+清壁纸槽)
 # 走 HTML 而非 JS 插件: index.html 每次请求从磁盘下发, 不受 JS 包缓存影响(坑#26)
 # 壁纸透出依赖官方 Aqua 玻璃(cordis 注册 ui-aqua); 桥把壁纸喂给 Aqua 的 localStorage 槽(坑#28)
 function Update-WallpaperHtml([bool]$apply) {
@@ -724,6 +724,8 @@ function Update-WallpaperHtml([bool]$apply) {
     if (-not (Test-Path -LiteralPath $html)) { return }
     $text = [IO.File]::ReadAllText($html, [Text.UTF8Encoding]::new($false))
     if ($apply) {
+        # 清掉「原版UI」标记注释: 设壁纸 = 离开原版状态
+        $text = $text -replace '/\* dsh-original[^*]*\*/', ''
         $ts = [DateTime]::Now.Ticks
         if ($text.Contains('body{background:none !important;}')) {
             # Reset 清空过: 恢复 url
@@ -745,13 +747,13 @@ function Update-WallpaperHtml([bool]$apply) {
         if (-not $text.Contains('dsh-wallpaper-bridge')) {
             $bridge = "    <script id=`"dsh-wallpaper-bridge`">`n" +
                       "      /* 壁纸中心桥: 把启动器写入的壁纸喂给官方 Aqua 的 localStorage 槽。 */`n" +
-                      "      (function(){try{var s=document.getElementById('dsh-wallpaper-css');if(!s)return;var k='dsh.wallpaper.center.ts';var i=s.textContent.indexOf('wallpaper/current.png?t=');if(i<0){if(localStorage.getItem(k)){localStorage.setItem('dsh.ui-aqua.wallpaper','');localStorage.setItem('dsh.ui-aqua.background','fluid');localStorage.removeItem(k);}return;}var j=s.textContent.indexOf(')',i);var t=s.textContent.substring(i+24,j);if(localStorage.getItem(k)===t)return;localStorage.setItem('dsh.ui-aqua.wallpaper','/wallpaper/current.png?t='+t);localStorage.setItem('dsh.ui-aqua.background','wallpaper');localStorage.setItem('dsh.ui-aqua.enabled','true');localStorage.setItem(k,t);}catch(e){}})();`n" +
+                      "      (function(){try{var s=document.getElementById('dsh-wallpaper-css');if(!s)return;var txt=s.textContent;var k='dsh.wallpaper.center.ts';var ok='dsh.wallpaper.center.original';if(txt.indexOf('dsh-original')>=0){if(!localStorage.getItem(ok)){localStorage.setItem('dsh.ui-aqua.enabled','false');localStorage.setItem('dsh.ui-aqua.wallpaper','');localStorage.setItem('dsh.ui-aqua.background','fluid');localStorage.removeItem(k);localStorage.setItem(ok,'1');}return;}var i=txt.indexOf('wallpaper/current.png?t=');if(i<0)return;var j=txt.indexOf(')',i);var t=txt.substring(i+24,j);if(localStorage.getItem(k)===t)return;localStorage.setItem('dsh.ui-aqua.wallpaper','/wallpaper/current.png?t='+t);localStorage.setItem('dsh.ui-aqua.background','wallpaper');localStorage.setItem('dsh.ui-aqua.enabled','true');localStorage.removeItem(ok);localStorage.setItem(k,t);}catch(e){}})();`n" +
                       "    </script>`n  </head>"
             $text = $text.Replace('</head>', $bridge)
         }
     } else {
         $text = $text -replace 'body\{background:url\([^)]*\) center/cover no-repeat fixed !important;\}',
-            'body{background:none !important;}'
+            "`n      /* dsh-original: 原版UI, 桥脚本据此一次性关玻璃回流体 */`n      body{background:none !important;}"
     }
     [IO.File]::WriteAllText($html, $text, [Text.UTF8Encoding]::new($false))
 }
@@ -774,6 +776,65 @@ function Show-WallpaperHint([string]$text) {
 function Update-WallpaperPanel {
     $wallpaperGrid.Children.Clear()
     New-Item -ItemType Directory -Force -Path $WallpaperDir | Out-Null
+    # 首卡: 原版UI 快捷卡 — 一键回出厂界面(玻璃关+壁纸清), 与壁纸卡互相切换测试
+    $card0 = [System.Windows.Controls.Border]::new()
+    $card0.Width = 190
+    $card0.CornerRadius = [System.Windows.CornerRadius]::new(12)
+    $card0.Background = [System.Windows.Media.Brushes]::White
+    $card0.BorderBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#E0E4EC"))
+    $card0.BorderThickness = [System.Windows.Thickness]::new(1)
+    $card0.Margin = [System.Windows.Thickness]::new(0, 0, 12, 12)
+    $sp0 = [System.Windows.Controls.StackPanel]::new()
+    # 缩略图: 白底 + 左侧浅灰侧栏 + 底部输入条(迷你原版UI示意)
+    $thumb0 = [System.Windows.Controls.Grid]::new()
+    $thumb0.Width = 188
+    $thumb0.Height = 105
+    $side0 = [System.Windows.Shapes.Rectangle]::new()
+    $side0.Width = 56
+    $side0.Height = 105
+    $side0.Fill = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#F3F5F8"))
+    $side0.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Left
+    $side0.VerticalAlignment = [System.Windows.VerticalAlignment]::Top
+    $bar0 = [System.Windows.Shapes.Rectangle]::new()
+    $bar0.Width = 90
+    $bar0.Height = 14
+    $bar0.RadiusX = 7
+    $bar0.RadiusY = 7
+    $bar0.Fill = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#E8EBF0"))
+    $bar0.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $bar0.VerticalAlignment = [System.Windows.VerticalAlignment]::Bottom
+    $bar0.Margin = [System.Windows.Thickness]::new(0, 0, 0, 12)
+    $lab0 = [System.Windows.Controls.TextBlock]::new()
+    $lab0.Text = "原版"
+    $lab0.FontSize = 11
+    $lab0.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#8A919E"))
+    $lab0.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $lab0.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $lab0.Margin = [System.Windows.Thickness]::new(60, 0, 0, 0)
+    $thumb0.Children.Add($side0) | Out-Null
+    $thumb0.Children.Add($bar0) | Out-Null
+    $thumb0.Children.Add($lab0) | Out-Null
+    $nm0 = [System.Windows.Controls.TextBlock]::new()
+    $nm0.Text = "原版 UI（出厂界面）"
+    $nm0.FontSize = 11
+    $nm0.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#3D4350"))
+    $nm0.Margin = [System.Windows.Thickness]::new(8, 6, 8, 0)
+    $nm0.TextTrimming = [System.Windows.TextTrimming]::CharacterEllipsis
+    $btns0 = [System.Windows.Controls.StackPanel]::new()
+    $btns0.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+    $btns0.Margin = [System.Windows.Thickness]::new(8, 6, 8, 8)
+    $bRestore = [System.Windows.Controls.Button]::new()
+    $bRestore.Content = "🧊 恢复原版"
+    $bRestore.FontSize = 11
+    $bRestore.Style = $window.FindResource("GhostBtn")
+    $bRestore.Add_Click({ Reset-Wallpaper })
+    $btns0.Children.Add($bRestore) | Out-Null
+    $sp0.Children.Add($thumb0) | Out-Null
+    $sp0.Children.Add($nm0) | Out-Null
+    $sp0.Children.Add($btns0) | Out-Null
+    $card0.Child = $sp0
+    $wallpaperGrid.Children.Add($card0) | Out-Null
+    # 壁纸卡
     $files = @(Get-ChildItem -LiteralPath $WallpaperDir -File | Where-Object { $_.Extension -match '\.(png|jpg|jpeg|webp|bmp|gif)$' } | Sort-Object LastWriteTime -Descending)
     $cur = Join-Path $script:WallpaperStatic "current.png"
     if ($files.Count -eq 0) {
@@ -850,7 +911,7 @@ function Update-WallpaperPanel {
         $card.Child = $sp
         $wallpaperGrid.Children.Add($card) | Out-Null
     }
-    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸后自动开启玻璃(Aqua)以透出壁纸, 玻璃可随时在 DSH 设置-玻璃主题 里关 · 刷新网页生效"
+    $wallpaperHint.Text = "壁纸库: $WallpaperDir ($($files.Count) 张) · 设壁纸自动开玻璃以透出(可在 DSH 设置-玻璃主题 关) · 首卡「原版 UI」一键回出厂界面 · 刷新网页生效"
 }
 
 function Add-WallpaperFile {
